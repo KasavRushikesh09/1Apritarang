@@ -7,6 +7,7 @@ import {
 } from "@/lib/db/schema";
 
 type NullableString = string | null;
+type SafeRecord = Record<string, unknown>;
 
 function cleanString(value: unknown): NullableString {
   if (typeof value !== "string") return null;
@@ -35,9 +36,9 @@ function cleanBoolean(value: unknown): boolean {
   return false;
 }
 
-function cleanObject(value: unknown): Record<string, unknown> {
+function cleanObject(value: unknown): SafeRecord {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
+    ? (value as SafeRecord)
     : {};
 }
 
@@ -63,7 +64,8 @@ export async function POST(req: NextRequest) {
     const onboardingStatus =
       body.onboardingStatus === "submitted" ? "submitted" : "draft";
 
-    const reviewStatus = onboardingStatus === "submitted" ? "pending_sales_head" : null;
+    const reviewStatus =
+      onboardingStatus === "submitted" ? "pending_sales_head" : null;
 
     const ownerName = cleanString(body.ownerName);
     const ownerPhone = cleanPhone(body.ownerPhone);
@@ -74,25 +76,53 @@ export async function POST(req: NextRequest) {
     const beneficiaryName = cleanString(body.beneficiaryName);
     const ifscCode = cleanString(body.ifscCode);
 
-    const documents: any[] = Array.isArray(body.documents) ? body.documents : [];
+    const documents: SafeRecord[] = Array.isArray(body.documents)
+      ? (body.documents as SafeRecord[])
+      : [];
+
     const agreementConfig = cleanObject(body.agreement);
 
-    const salesManager = cleanObject(agreementConfig.salesManager);
-    const itarangSignatory1 = cleanObject(agreementConfig.itarangSignatory1);
-    const itarangSignatory2 = cleanObject(agreementConfig.itarangSignatory2);
+    const salesManager =
+      cleanObject(agreementConfig["salesManager"]) ||
+      cleanObject(body["salesManager"]);
 
-    const salesManagerName = cleanString(salesManager.name);
-    const salesManagerEmail = cleanEmail(salesManager.email);
-    const salesManagerMobile = cleanPhone(salesManager.mobile);
+    const itarangSignatory1 = cleanObject(agreementConfig["itarangSignatory1"]);
+    const itarangSignatory2 = cleanObject(agreementConfig["itarangSignatory2"]);
 
-    const itarangSignatory1Name = cleanString(itarangSignatory1.name);
-    const itarangSignatory1Email = cleanEmail(itarangSignatory1.email);
-    const itarangSignatory1Mobile = cleanPhone(itarangSignatory1.mobile);
+    const salesManagerName = cleanString(
+      salesManager["name"] ?? salesManager["salesManagerName"]
+    );
 
-    const itarangSignatory2Name = cleanString(itarangSignatory2.name);
-    const itarangSignatory2Email = cleanEmail(itarangSignatory2.email);
-    const itarangSignatory2Mobile = cleanPhone(itarangSignatory2.mobile);
+    const salesManagerEmail = cleanEmail(
+      salesManager["email"] ??
+      salesManager["emailId"] ??
+      salesManager["salesManagerEmail"]
+    );
 
+    const salesManagerMobile = cleanPhone(
+      salesManager["mobile"] ??
+      salesManager["phone"] ??
+      salesManager["contactNumber"] ??
+      salesManager["salesManagerMobile"]
+    );
+
+    const itarangSignatory1Name = cleanString(itarangSignatory1["name"]);
+    const itarangSignatory1Email = cleanEmail(itarangSignatory1["email"]);
+    const itarangSignatory1Mobile = cleanPhone(itarangSignatory1["mobile"]);
+
+    const itarangSignatory2Name = cleanString(itarangSignatory2["name"]);
+    const itarangSignatory2Email = cleanEmail(itarangSignatory2["email"]);
+    const itarangSignatory2Mobile = cleanPhone(itarangSignatory2["mobile"]);
+    
+    console.log("SAVE ROUTE FULL AGREEMENT:", JSON.stringify(agreementConfig, null, 2));
+    console.log("SAVE ROUTE SALES MANAGER RAW:", JSON.stringify(salesManager, null, 2));
+    console.log("SAVE ROUTE SALES MANAGER NAME:", salesManagerName);
+    console.log("SAVE ROUTE SALES MANAGER EMAIL:", salesManagerEmail);
+    console.log("SAVE ROUTE SALES MANAGER MOBILE:", salesManagerMobile);
+    console.log("SAVE ROUTE SIGNATORY 1 EMAIL:", itarangSignatory1Email);
+    console.log("SAVE ROUTE SIGNATORY 2 EMAIL:", itarangSignatory2Email);
+    console.log("SAVE ROUTE dealerUserId:", dealerUserId);
+    
     if (!companyName) {
       return NextResponse.json(
         { success: false, message: "Company name is required" },
@@ -132,9 +162,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    let application:
-      | typeof dealerOnboardingApplications.$inferSelect
-      | null = null;
+    let application: typeof dealerOnboardingApplications.$inferSelect | null =
+      null;
 
     if (dealerUserId) {
       const existing = await db
@@ -182,9 +211,9 @@ export async function POST(req: NextRequest) {
             agreementStatus:
               onboardingStatus === "submitted"
                 ? "not_generated"
-                : (typeof agreementConfig.agreementStatus === "string" &&
-                    agreementConfig.agreementStatus) ||
-                  "not_generated",
+                : (typeof agreementConfig["agreementStatus"] === "string" &&
+                  agreementConfig["agreementStatus"]) ||
+                "not_generated",
 
             providerSigningUrl: null,
             providerDocumentId: null,
@@ -270,28 +299,37 @@ export async function POST(req: NextRequest) {
 
     if (documents.length > 0) {
       const validDocuments = documents
-        .filter(
-          (doc: any) =>
-            doc?.documentType &&
-            doc?.bucketName &&
-            doc?.storagePath &&
-            doc?.fileName
-        )
-        .map((doc: any) => ({
-          applicationId: application!.id,
-          documentType: doc.documentType,
-          bucketName: doc.bucketName,
-          storagePath: doc.storagePath,
-          fileName: doc.fileName,
-          fileUrl: doc.fileUrl ?? null,
-          mimeType: doc.mimeType ?? null,
-          fileSize: typeof doc.fileSize === "number" ? doc.fileSize : null,
+        .filter((doc) => {
+          return (
+            typeof doc["documentType"] === "string" &&
+            typeof doc["bucketName"] === "string" &&
+            typeof doc["storagePath"] === "string" &&
+            typeof doc["fileName"] === "string"
+          );
+        })
+        .map((doc) => ({
+          applicationId: application.id,
+          documentType: String(doc["documentType"]),
+          bucketName: String(doc["bucketName"]),
+          storagePath: String(doc["storagePath"]),
+          fileName: String(doc["fileName"]),
+          fileUrl: typeof doc["fileUrl"] === "string" ? doc["fileUrl"] : null,
+          mimeType:
+            typeof doc["mimeType"] === "string" ? doc["mimeType"] : null,
+          fileSize:
+            typeof doc["fileSize"] === "number" ? doc["fileSize"] : null,
           uploadedBy: dealerUserId,
-          docStatus: doc.docStatus ?? "uploaded",
-          verificationStatus: doc.verificationStatus ?? "pending",
+          docStatus:
+            typeof doc["docStatus"] === "string" ? doc["docStatus"] : "uploaded",
+          verificationStatus:
+            typeof doc["verificationStatus"] === "string"
+              ? doc["verificationStatus"]
+              : "pending",
           metadata:
-            doc.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)
-              ? doc.metadata
+            doc["metadata"] &&
+              typeof doc["metadata"] === "object" &&
+              !Array.isArray(doc["metadata"])
+              ? (doc["metadata"] as Record<string, unknown>)
               : {},
         }));
 

@@ -243,6 +243,14 @@ export async function POST(_req: NextRequest, context: RouteContext) {
 
     const notificationRecipients = getNotificationRecipients(application);
 
+    console.log("APPROVE MAIL DEBUG:", {
+      applicationId: application.id,
+      companyName: application.companyName,
+      salesManagerEmail: application.salesManagerEmail,
+      itarangSignatory1Email: application.itarangSignatory1Email,
+      itarangSignatory2Email: application.itarangSignatory2Email,
+      notificationRecipients,
+    });
     let internalNotificationResults: Array<{
       email: string;
       success: boolean;

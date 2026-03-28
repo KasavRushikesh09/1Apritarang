@@ -1494,17 +1494,14 @@ export const dealerOnboardingApplications = pgTable("dealer_onboarding_applicati
   ownerPhone: varchar("owner_phone", { length: 20 }),
   ownerEmail: text("owner_email"),
 
-  // NEW — SALES MANAGER
   salesManagerName: text("sales_manager_name"),
   salesManagerEmail: text("sales_manager_email"),
   salesManagerMobile: text("sales_manager_mobile"),
 
-  // NEW — ITARANG SIGNER 1
   itarangSignatory1Name: text("itarang_signatory_1_name"),
   itarangSignatory1Email: text("itarang_signatory_1_email"),
   itarangSignatory1Mobile: text("itarang_signatory_1_mobile"),
 
-  // NEW — ITARANG SIGNER 2
   itarangSignatory2Name: text("itarang_signatory_2_name"),
   itarangSignatory2Email: text("itarang_signatory_2_email"),
   itarangSignatory2Mobile: text("itarang_signatory_2_mobile"),
@@ -1521,7 +1518,6 @@ export const dealerOnboardingApplications = pgTable("dealer_onboarding_applicati
 
   agreementStatus: varchar("agreement_status", { length: 50 }).default("not_generated"),
 
-  // DIGIO
   requestId: text("request_id"),
   providerDocumentId: text("provider_document_id"),
   providerSigningUrl: text("provider_signing_url"),
@@ -1539,12 +1535,12 @@ export const dealerOnboardingApplications = pgTable("dealer_onboarding_applicati
   approvedAt: timestamp("approved_at"),
 
   dealerAccountStatus: varchar("dealer_account_status", { length: 50 }).default("inactive"),
+  dealerCode: text("dealer_code"),
 
   submittedAt: timestamp("submitted_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
-
 export const dealerOnboardingDocuments = pgTable("dealer_onboarding_documents", {
     id: uuid("id").defaultRandom().primaryKey(),
 
