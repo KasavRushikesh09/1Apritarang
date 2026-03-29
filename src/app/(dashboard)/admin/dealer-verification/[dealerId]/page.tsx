@@ -18,6 +18,7 @@ import {
   ExternalLink,
   RefreshCw,
   FileSignature,
+  FileText,
 } from "lucide-react";
 
 type DocumentItem = {
@@ -397,6 +398,9 @@ export default function DealerReviewPage() {
   >(null);
   const [tracking, setTracking] = useState<AgreementTrackingResponse | null>(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
+  const [auditTrailLoading, setAuditTrailLoading] = useState(false);
+
+  const DIGIO_DASHBOARD_URL = "https://ext-enterprise.digio.in/digidocs/dashboard";
 
   const loadAgreementTracking = async () => {
     try {
@@ -599,6 +603,54 @@ export default function DealerReviewPage() {
       alert("Something went wrong while processing agreement action");
     } finally {
       setAgreementActionLoading(null);
+    }
+  };
+
+  const handleOpenAuditTrail = async () => {
+    try {
+      if (!tracking?.agreementId && !data?.agreement?.agreementId) {
+        alert("Agreement is not available yet.");
+        return;
+      }
+
+      if (tracking?.auditTrailUrl) {
+        window.open(tracking.auditTrailUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      setAuditTrailLoading(true);
+
+      const res = await fetch(
+        `/api/admin/dealer-verifications/${dealerId}/fetch-audit-trail`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const json = await res.json();
+
+      if (json?.success && json?.data?.auditTrailUrl) {
+        await reloadDealer();
+        window.open(json.data.auditTrailUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      alert(
+        "Audit trail is not available through Digio API for this agreement yet.\nPlease open Digio dashboard and download it manually."
+      );
+
+      window.open(DIGIO_DASHBOARD_URL, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error("Failed to open audit trail", error);
+      alert(
+        "Audit trail is not available right now.\nPlease check Digio dashboard."
+      );
+      window.open(DIGIO_DASHBOARD_URL, "_blank", "noopener,noreferrer");
+    } finally {
+      setAuditTrailLoading(false);
     }
   };
 
@@ -1027,6 +1079,19 @@ export default function DealerReviewPage() {
                         : "Retry Download Signed Copy"}
                     </button>
                   )}
+
+                <button
+                  onClick={handleOpenAuditTrail}
+                  disabled={
+                    auditTrailLoading ||
+                    isRejected ||
+                    (!tracking?.agreementId && !data?.agreement?.agreementId)
+                  }
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  {auditTrailLoading ? "Opening Audit Trail..." : "Download Audit Trail"}
+                </button>
               </div>
 
               <div className="mt-8 rounded-[24px] border border-slate-200 bg-white shadow-sm">
@@ -1036,7 +1101,7 @@ export default function DealerReviewPage() {
                       Agreement Tracking Table
                     </h3>
                     <p className="mt-1 text-sm text-slate-500">
-                      Signer-wise agreement progress, agreement copy, audit trail, and actions.
+                      Signer-wise agreement progress and available actions.
                     </p>
                   </div>
 
@@ -1055,8 +1120,6 @@ export default function DealerReviewPage() {
                         <th className="px-6 py-4">Signer Name</th>
                         <th className="px-6 py-4">Signer Email</th>
                         <th className="px-6 py-4">Signer Status</th>
-                        <th className="px-6 py-4">Agreement Copy</th>
-                        <th className="px-6 py-4">Audit Trail</th>
                         <th className="px-6 py-4">Actions</th>
                       </tr>
                     </thead>
@@ -1064,7 +1127,7 @@ export default function DealerReviewPage() {
                     <tbody>
                       {trackingLoading ? (
                         <tr>
-                          <td colSpan={7} className="px-6 py-8 text-sm text-slate-500">
+                          <td colSpan={5} className="px-6 py-8 text-sm text-slate-500">
                             Loading agreement tracking...
                           </td>
                         </tr>
@@ -1099,38 +1162,6 @@ export default function DealerReviewPage() {
                             </td>
 
                             <td className="px-6 py-4">
-                              {tracking?.signedAgreementUrl ? (
-                                <a
-                                  href={tracking.signedAgreementUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
-                                >
-                                  <Download className="h-4 w-4" />
-                                  View / Download
-                                </a>
-                              ) : (
-                                <span className="text-slate-400">Not available</span>
-                              )}
-                            </td>
-
-                            <td className="px-6 py-4">
-                              {tracking?.auditTrailUrl ? (
-                                <a
-                                  href={tracking.auditTrailUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
-                                >
-                                  <Download className="h-4 w-4" />
-                                  View / Download
-                                </a>
-                              ) : (
-                                <span className="text-slate-400">Not available</span>
-                              )}
-                            </td>
-
-                            <td className="px-6 py-4">
                               {tracking?.canReInitiate ? (
                                 <button
                                   onClick={() => handleAgreementAction("reinitiate")}
@@ -1160,7 +1191,7 @@ export default function DealerReviewPage() {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={7} className="px-6 py-8 text-sm text-slate-500">
+                          <td colSpan={5} className="px-6 py-8 text-sm text-slate-500">
                             No agreement tracking rows available yet.
                           </td>
                         </tr>

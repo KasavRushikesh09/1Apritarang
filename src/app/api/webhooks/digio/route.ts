@@ -26,6 +26,19 @@ function extractSignedAgreementUrl(body: any) {
   );
 }
 
+function extractAuditTrailUrl(body: any) {
+  return (
+    body?.audit_trail_url ||
+    body?.auditTrailUrl ||
+    body?.audit_url ||
+    body?.document?.audit_trail_url ||
+    body?.document?.auditTrailUrl ||
+    body?.agreement?.audit_trail_url ||
+    body?.agreement?.auditTrailUrl ||
+    null
+  );
+}
+
 function extractFailureReason(body: any) {
   return (
     body?.failure_reason ||
@@ -34,6 +47,34 @@ function extractFailureReason(body: any) {
     body?.error ||
     null
   );
+}
+
+async function findApplication(documentId?: string | null, requestId?: string | null) {
+  if (documentId) {
+    const byDocumentId = await db
+      .select()
+      .from(dealerOnboardingApplications)
+      .where(eq(dealerOnboardingApplications.providerDocumentId, documentId))
+      .limit(1);
+
+    if (byDocumentId[0]) {
+      return byDocumentId[0];
+    }
+  }
+
+  if (requestId) {
+    const byRequestId = await db
+      .select()
+      .from(dealerOnboardingApplications)
+      .where(eq(dealerOnboardingApplications.requestId, requestId))
+      .limit(1);
+
+    if (byRequestId[0]) {
+      return byRequestId[0];
+    }
+  }
+
+  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -46,34 +87,44 @@ export async function POST(req: NextRequest) {
     const rawStatus = body.status || "";
     const agreementStatus = mapDigioStatusToAgreementStatus(rawStatus);
     const signedAgreementUrl = extractSignedAgreementUrl(body);
+    const auditTrailUrl = extractAuditTrailUrl(body);
     const failureReason = extractFailureReason(body);
 
-    if (!documentId) {
+    console.log("[DIGIO WEBHOOK] documentId:", documentId);
+    console.log("[DIGIO WEBHOOK] requestId:", requestId);
+    console.log("[DIGIO WEBHOOK] rawStatus:", rawStatus);
+    console.log("[DIGIO WEBHOOK] mapped agreementStatus:", agreementStatus);
+    console.log("[DIGIO WEBHOOK] extracted signedAgreementUrl:", signedAgreementUrl);
+    console.log("[DIGIO WEBHOOK] extracted auditTrailUrl:", auditTrailUrl);
+    console.log("[DIGIO WEBHOOK] full body:", JSON.stringify(body, null, 2));
+
+    if (!documentId && !requestId) {
       return NextResponse.json(
-        { success: false, message: "document_id is required in Digio webhook" },
+        {
+          success: false,
+          message: "document_id or request_id is required in Digio webhook",
+        },
         { status: 400 }
       );
     }
 
-    const rows = await db
-      .select()
-      .from(dealerOnboardingApplications)
-      .where(eq(dealerOnboardingApplications.providerDocumentId, documentId))
-      .limit(1);
-
-    const application = rows[0];
+    const application = await findApplication(documentId, requestId);
 
     if (!application) {
+      console.error("[DIGIO WEBHOOK] Application not found for documentId/requestId");
       return NextResponse.json(
-        { success: false, message: "Application not found for document_id" },
+        {
+          success: false,
+          message: "Application not found for provided Digio identifiers",
+        },
         { status: 404 }
       );
     }
 
     const updatePayload: any = {
       agreementStatus,
-      requestId,
-      providerDocumentId: documentId,
+      requestId: requestId || application.requestId || null,
+      providerDocumentId: documentId || application.providerDocumentId || null,
       providerRawResponse: body,
       lastActionTimestamp: new Date(),
       updatedAt: new Date(),
@@ -84,19 +135,21 @@ export async function POST(req: NextRequest) {
       updatePayload.completionStatus = "completed";
       updatePayload.signedAt = new Date();
       updatePayload.agreementCompletedAt = new Date();
-      updatePayload.signedAgreementUrl = signedAgreementUrl;
 
-      // If Digio did not send audit trail URL, we will fetch manually
-      updatePayload.auditTrailUrl = extractAuditTrailUrl(body);
+      if (signedAgreementUrl) {
+        updatePayload.signedAgreementUrl = signedAgreementUrl;
+      }
 
-      // AUTO FETCH signed agreement + audit trail after completion
+      if (auditTrailUrl) {
+        updatePayload.auditTrailUrl = auditTrailUrl;
+      }
+
       try {
         const appBaseUrl =
           process.env.APP_URL ||
           process.env.NEXT_PUBLIC_APP_URL ||
           "http://localhost:3000";
 
-        // Fetch signed agreement if not present
         if (!signedAgreementUrl) {
           await fetch(
             `${appBaseUrl}/api/admin/dealer-verifications/${application.id}/fetch-signed-agreement`,
@@ -104,25 +157,15 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        // Fetch audit trail
-        await fetch(
-          `${appBaseUrl}/api/admin/dealer-verifications/${application.id}/fetch-audit-trail`,
-          { method: "POST" }
-        );
+        if (!auditTrailUrl) {
+          await fetch(
+            `${appBaseUrl}/api/admin/dealer-verifications/${application.id}/fetch-audit-trail`,
+            { method: "POST" }
+          );
+        }
       } catch (e) {
         console.error("AUTO FETCH SIGNED DOCS ERROR:", e);
       }
-    }
-
-    function extractAuditTrailUrl(body: any) {
-      return (
-        body?.audit_trail_url ||
-        body?.auditTrailUrl ||
-        body?.audit_url ||
-        body?.document?.audit_trail_url ||
-        body?.agreement?.audit_trail_url ||
-        null
-      );
     }
 
     if (agreementStatus === "failed") {
@@ -170,8 +213,12 @@ export async function POST(req: NextRequest) {
 
       const matchedSigner = existingSigners.find((row) => {
         return (
-          String(row.providerSignerIdentifier || "").trim().toLowerCase() === identifier.toLowerCase() ||
-          String(row.signerEmail || "").trim().toLowerCase() === identifier.toLowerCase() ||
+          String(row.providerSignerIdentifier || "")
+            .trim()
+            .toLowerCase() === identifier.toLowerCase() ||
+          String(row.signerEmail || "")
+            .trim()
+            .toLowerCase() === identifier.toLowerCase() ||
           String(row.signerMobile || "").trim() === identifier
         );
       });
@@ -187,7 +234,8 @@ export async function POST(req: NextRequest) {
           providerSigningUrl:
             party?.authentication_url || matchedSigner.providerSigningUrl,
           providerRawResponse: party || {},
-          signedAt: signerStatus === "signed" ? new Date() : matchedSigner.signedAt,
+          signedAt:
+            signerStatus === "signed" ? new Date() : matchedSigner.signedAt,
           lastEventAt: new Date(),
           updatedAt: new Date(),
         })
@@ -195,8 +243,8 @@ export async function POST(req: NextRequest) {
 
       await insertAgreementEvent({
         applicationId: application.id,
-        providerDocumentId: documentId,
-        requestId,
+        providerDocumentId: documentId || application.providerDocumentId || null,
+        requestId: requestId || application.requestId || null,
         eventType: "signer_status_updated",
         signerRole: matchedSigner.signerRole,
         eventStatus: signerStatus,
@@ -206,8 +254,8 @@ export async function POST(req: NextRequest) {
 
     await insertAgreementEvent({
       applicationId: application.id,
-      providerDocumentId: documentId,
-      requestId,
+      providerDocumentId: documentId || application.providerDocumentId || null,
+      requestId: requestId || application.requestId || null,
       eventType: agreementStatus,
       eventStatus: agreementStatus,
       eventPayload: body,

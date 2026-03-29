@@ -387,7 +387,7 @@ export async function POST(req: NextRequest) {
       include_authentication_url: true,
       sequential: true,
       signers,
-      
+
     };
 
     console.log(
@@ -460,17 +460,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
+        // Digio unique request id (sign request id)
         requestId:
           parsed?.id ||
           parsed?.request_id ||
-          parsed?.document_id ||
-          parsed?.documentId ||
           "",
+
+        // Digio document id (used for download + audit trail)
         providerDocumentId:
           parsed?.document_id ||
           parsed?.documentId ||
-          parsed?.id ||
           "",
+
         signingUrl,
         signerUrls: signingParties.map((party: any) => ({
           name: party?.name || "",

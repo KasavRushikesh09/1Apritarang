@@ -16,20 +16,59 @@ function basicAuthHeader(clientId: string, clientSecret: string) {
   return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`;
 }
 
-/**
- * Keep this configurable because Digio account/docs can vary.
- * If needed, set:
- * DIGIO_AUDIT_TRAIL_PATH_TEMPLATE=/v2/client/document/{documentId}/audit-trail/download
- */
-function buildAuditTrailEndpoint(baseUrl: string, documentId: string) {
-  const template =
-    cleanEnv(process.env.DIGIO_AUDIT_TRAIL_PATH_TEMPLATE) ||
-    "/v2/client/document/{documentId}/audit-trail/download";
-
+function buildAuditTrailEndpoints(
+  baseUrl: string,
+  ids: {
+    documentId?: string | null;
+    requestId?: string | null;
+  }
+) {
   const safeBase = baseUrl.replace(/\/+$/, "");
-  const safePath = template.replace("{documentId}", encodeURIComponent(documentId));
+  const envTemplate = cleanEnv(process.env.DIGIO_AUDIT_TRAIL_PATH_TEMPLATE);
 
-  return `${safeBase}${safePath.startsWith("/") ? "" : "/"}${safePath}`;
+  const documentId = ids.documentId ? encodeURIComponent(ids.documentId) : null;
+  const requestId = ids.requestId ? encodeURIComponent(ids.requestId) : null;
+
+  const endpoints: string[] = [];
+
+  if (envTemplate && documentId) {
+    const envPath = envTemplate.replace("{documentId}", documentId);
+    endpoints.push(
+      `${safeBase}${envPath.startsWith("/") ? "" : "/"}${envPath}`
+    );
+  }
+
+  if (documentId) {
+    endpoints.push(
+      `${safeBase}/v2/client/document/${documentId}/audit-trail/download`
+    );
+    endpoints.push(
+      `${safeBase}/v2/client/document/download_audit_trail?document_id=${documentId}`
+    );
+    endpoints.push(
+      `${safeBase}/v2/client/document/audit-trail/download?document_id=${documentId}`
+    );
+    endpoints.push(
+      `${safeBase}/v2/client/document/download/audit-trail?document_id=${documentId}`
+    );
+  }
+
+  if (requestId) {
+    endpoints.push(
+      `${safeBase}/v2/client/document/download_audit_trail?request_id=${requestId}`
+    );
+    endpoints.push(
+      `${safeBase}/v2/client/document/audit-trail/download?request_id=${requestId}`
+    );
+    endpoints.push(
+      `${safeBase}/v2/client/document/download/audit-trail?request_id=${requestId}`
+    );
+    endpoints.push(
+      `${safeBase}/v2/client/request/${requestId}/audit-trail/download`
+    );
+  }
+
+  return [...new Set(endpoints)];
 }
 
 async function getApplicationOr404(dealerId: string) {
@@ -42,40 +81,85 @@ async function getApplicationOr404(dealerId: string) {
   return rows[0] || null;
 }
 
-async function fetchDigioAuditTrail(documentId: string) {
+async function tryFetchDigioAuditTrail(ids: {
+  documentId?: string | null;
+  requestId?: string | null;
+}) {
   const clientId = cleanEnv(process.env.DIGIO_CLIENT_ID);
   const clientSecret = cleanEnv(process.env.DIGIO_CLIENT_SECRET);
   const baseUrl =
     cleanEnv(process.env.DIGIO_BASE_URL) || "https://ext.digio.in:444";
 
   if (!clientId || !clientSecret) {
-    throw new Error(
-      "Missing Digio configuration. Set DIGIO_CLIENT_ID and DIGIO_CLIENT_SECRET."
-    );
+    return {
+      success: false as const,
+      message:
+        "Missing Digio configuration. Set DIGIO_CLIENT_ID and DIGIO_CLIENT_SECRET.",
+      lastEndpoint: null,
+      lastBody: null,
+      response: null,
+    };
   }
 
-  const endpoint = buildAuditTrailEndpoint(baseUrl, documentId);
+  const endpoints = buildAuditTrailEndpoints(baseUrl, ids);
 
-  const response = await fetch(endpoint, {
-    method: "GET",
-    headers: {
-      Authorization: basicAuthHeader(clientId, clientSecret),
-      Accept: "application/pdf, application/json, */*",
-    },
-    cache: "no-store",
-  });
+  console.log("[DIGIO AUDIT TRAIL] documentId:", ids.documentId);
+  console.log("[DIGIO AUDIT TRAIL] requestId:", ids.requestId);
+  console.log("[DIGIO AUDIT TRAIL] endpoints:", endpoints);
 
-  return response;
+  let lastBody: any = null;
+  let lastEndpoint: string | null = null;
+
+  for (const endpoint of endpoints) {
+    console.log("[DIGIO AUDIT TRAIL] Trying endpoint:", endpoint);
+
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Authorization: basicAuthHeader(clientId, clientSecret),
+        Accept: "application/pdf, application/json, */*",
+      },
+      cache: "no-store",
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+
+    if (response.ok) {
+      console.log("[DIGIO AUDIT TRAIL] Success endpoint:", endpoint);
+      return {
+        success: true as const,
+        response,
+        endpoint,
+      };
+    }
+
+    let raw: any = null;
+    try {
+      raw = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+    } catch {
+      raw = null;
+    }
+
+    console.error("[DIGIO AUDIT TRAIL] Failed endpoint:", endpoint);
+    console.error("[DIGIO AUDIT TRAIL] Status:", response.status);
+    console.error("[DIGIO AUDIT TRAIL] Raw:", raw);
+
+    lastBody = raw;
+    lastEndpoint = endpoint;
+  }
+
+  return {
+    success: false as const,
+    message:
+      "Audit trail is not available through the current Digio API response or endpoint for this agreement. Please check Digio dashboard and store the audit trail manually.",
+    lastEndpoint,
+    lastBody,
+    response: null,
+  };
 }
 
-/**
- * POST:
- * 1. verifies Digio audit trail is fetchable
- * 2. stores an INTERNAL proxy URL into auditTrailUrl
- * 3. inserts agreement event
- *
- * This avoids needing storage right now.
- */
 export async function POST(_req: NextRequest, context: Context) {
   try {
     const { dealerId } = await context.params;
@@ -89,49 +173,64 @@ export async function POST(_req: NextRequest, context: Context) {
       );
     }
 
-    if (!application.providerDocumentId) {
+    if (application.auditTrailUrl) {
+      return NextResponse.json({
+        success: true,
+        message: "Audit trail already available",
+        data: {
+          auditTrailUrl: application.auditTrailUrl,
+          source: "stored",
+        },
+      });
+    }
+
+    if (!application.providerDocumentId && !application.requestId) {
       return NextResponse.json(
         {
           success: false,
-          message: "providerDocumentId is missing. Agreement was not initiated properly.",
+          message: "Both providerDocumentId and requestId are missing.",
         },
         { status: 400 }
       );
     }
 
-    const digioResponse = await fetchDigioAuditTrail(application.providerDocumentId);
+    const result = await tryFetchDigioAuditTrail({
+      documentId: application.providerDocumentId,
+      requestId: application.requestId,
+    });
 
-    const contentType = digioResponse.headers.get("content-type") || "";
-
-    if (!digioResponse.ok) {
-      let raw: any = null;
-
-      try {
-        raw = contentType.includes("application/json")
-          ? await digioResponse.json()
-          : await digioResponse.text();
-      } catch {
-        raw = null;
-      }
+    if (!result.success) {
+      await insertAgreementEvent({
+        applicationId: application.id,
+        providerDocumentId: application.providerDocumentId || null,
+        requestId: application.requestId || null,
+        eventType: "audit_trail_unavailable",
+        eventStatus: "unavailable",
+        eventPayload: {
+          reason: result.message,
+          lastEndpoint: result.lastEndpoint,
+          lastBody: result.lastBody,
+        },
+      });
 
       return NextResponse.json(
         {
           success: false,
           message:
-            (typeof raw === "object" && raw?.message) ||
-            (typeof raw === "object" && raw?.error) ||
-            "Failed to fetch audit trail from Digio",
-          raw,
+            "Audit trail is not available through Digio API for this agreement yet. Please open Digio dashboard and download it manually.",
+          data: {
+            auditTrailUrl: null,
+            providerDocumentId: application.providerDocumentId || null,
+            requestId: application.requestId || null,
+            lastEndpoint: result.lastEndpoint,
+            providerError: result.lastBody || null,
+          },
         },
-        { status: digioResponse.status }
+        { status: 200 }
       );
     }
 
-    const appBaseUrl =
-      cleanEnv(process.env.APP_URL) ||
-      cleanEnv(process.env.NEXT_PUBLIC_APP_URL) ||
-      "http://localhost:3000";
-
+    const appBaseUrl = reqBaseUrlFromEnvOrLocal();
     const internalAuditTrailUrl = `${appBaseUrl}/api/admin/dealer-verifications/${dealerId}/fetch-audit-trail?download=1`;
 
     await db
@@ -145,7 +244,7 @@ export async function POST(_req: NextRequest, context: Context) {
 
     await insertAgreementEvent({
       applicationId: application.id,
-      providerDocumentId: application.providerDocumentId,
+      providerDocumentId: application.providerDocumentId || null,
       requestId: application.requestId || null,
       eventType: "audit_trail_fetched",
       eventStatus: "available",
@@ -160,6 +259,7 @@ export async function POST(_req: NextRequest, context: Context) {
       message: "Audit trail fetched successfully",
       data: {
         auditTrailUrl: internalAuditTrailUrl,
+        source: "proxy",
       },
     });
   } catch (error: any) {
@@ -168,18 +268,14 @@ export async function POST(_req: NextRequest, context: Context) {
     return NextResponse.json(
       {
         success: false,
-        message: error?.message || "Failed to fetch audit trail",
+        message:
+          "Audit trail is not available right now. Please check Digio dashboard or try again later.",
       },
-      { status: 500 }
+      { status: 200 }
     );
   }
 }
 
-/**
- * GET:
- * Proxies the actual Digio audit trail file to the browser.
- * This is what your UI can open when user clicks View / Download.
- */
 export async function GET(req: NextRequest, context: Context) {
   try {
     const { dealerId } = await context.params;
@@ -194,62 +290,69 @@ export async function GET(req: NextRequest, context: Context) {
       );
     }
 
-    if (!application.providerDocumentId) {
+    if (!application.providerDocumentId && !application.requestId) {
       return NextResponse.json(
         {
           success: false,
-          message: "providerDocumentId is missing. Cannot fetch audit trail.",
+          message: "Both providerDocumentId and requestId are missing.",
         },
         { status: 400 }
       );
     }
 
-    /**
-     * If someone opens the route without ?download=1,
-     * return the saved metadata instead of file bytes.
-     */
     if (download !== "1") {
       return NextResponse.json({
         success: true,
         data: {
           applicationId: application.id,
-          providerDocumentId: application.providerDocumentId,
+          providerDocumentId: application.providerDocumentId || null,
+          requestId: application.requestId || null,
           auditTrailUrl: application.auditTrailUrl || null,
         },
       });
     }
 
-    const digioResponse = await fetchDigioAuditTrail(application.providerDocumentId);
-    const contentType = digioResponse.headers.get("content-type") || "application/pdf";
+    const result = await tryFetchDigioAuditTrail({
+      documentId: application.providerDocumentId,
+      requestId: application.requestId,
+    });
 
-    if (!digioResponse.ok) {
-      let raw: any = null;
-
-      try {
-        raw = contentType.includes("application/json")
-          ? await digioResponse.json()
-          : await digioResponse.text();
-      } catch {
-        raw = null;
-      }
+    if (!result.success || !result.response) {
+      await insertAgreementEvent({
+        applicationId: application.id,
+        providerDocumentId: application.providerDocumentId || null,
+        requestId: application.requestId || null,
+        eventType: "audit_trail_download_unavailable",
+        eventStatus: "unavailable",
+        eventPayload: {
+          reason: result.message,
+          lastEndpoint: result.lastEndpoint,
+          lastBody: result.lastBody,
+        },
+      });
 
       return NextResponse.json(
         {
           success: false,
           message:
-            (typeof raw === "object" && raw?.message) ||
-            (typeof raw === "object" && raw?.error) ||
-            "Failed to download audit trail from Digio",
-          raw,
+            "Audit trail PDF could not be downloaded from Digio API. Please use Digio dashboard for this agreement.",
+          data: {
+            providerDocumentId: application.providerDocumentId || null,
+            requestId: application.requestId || null,
+            lastEndpoint: result.lastEndpoint,
+            providerError: result.lastBody || null,
+          },
         },
-        { status: digioResponse.status }
+        { status: 404 }
       );
     }
 
-    const arrayBuffer = await digioResponse.arrayBuffer();
+    const contentType =
+      result.response.headers.get("content-type") || "application/pdf";
+    const arrayBuffer = await result.response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const filename = `audit-trail-${application.providerDocumentId}.pdf`;
+    const filename = `audit-trail-${application.providerDocumentId || application.requestId}.pdf`;
 
     return new NextResponse(buffer, {
       status: 200,
@@ -267,9 +370,18 @@ export async function GET(req: NextRequest, context: Context) {
     return NextResponse.json(
       {
         success: false,
-        message: error?.message || "Failed to download audit trail",
+        message:
+          "Audit trail PDF is not available right now. Please use Digio dashboard.",
       },
-      { status: 500 }
+      { status: 404 }
     );
   }
+}
+
+function reqBaseUrlFromEnvOrLocal() {
+  return (
+    cleanEnv(process.env.APP_URL) ||
+    cleanEnv(process.env.NEXT_PUBLIC_APP_URL) ||
+    "http://localhost:3000"
+  );
 }
