@@ -346,7 +346,7 @@ export default function StepReview() {
       console.log("Dealer onboarding saved in DB:", result.application);
       console.log("Dealer onboarding completed with ID:", generatedDealerId);
 
-      await supabase.auth.signOut();
+      try { await supabase.auth.signOut(); } catch {}
       router.push("/login");
       router.refresh();
 

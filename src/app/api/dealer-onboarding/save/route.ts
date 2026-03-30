@@ -68,19 +68,14 @@ export async function POST(req: NextRequest) {
 
     const {
       data: { user },
-      error: authError,
     } = await supabase.auth.getUser();
 
-    if (authError || !user) {
-      return NextResponse.json(
-        { success: false, message: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    // Auth is optional — unauthenticated dealers submit via the "Create one" flow.
+    // Admin approval will later create the auth user and link dealerUserId.
 
     const body = await req.json();
 
-    const dealerUserId = user.id;
+    const dealerUserId = user?.id || null;
     const dealerCode =
       cleanString(body.dealerCode) ||
       cleanString(body.dealer_id) ||
@@ -200,14 +195,28 @@ export async function POST(req: NextRequest) {
     let application: typeof dealerOnboardingApplications.$inferSelect | null =
       null;
 
-    const existing = await db
-      .select()
-      .from(dealerOnboardingApplications)
-      .where(eq(dealerOnboardingApplications.dealerUserId, dealerUserId))
-      .limit(1);
+    if (dealerUserId) {
+      const existing = await db
+        .select()
+        .from(dealerOnboardingApplications)
+        .where(eq(dealerOnboardingApplications.dealerUserId, dealerUserId))
+        .limit(1);
 
-    if (existing.length > 0) {
-      application = existing[0];
+      if (existing.length > 0) {
+        application = existing[0];
+      }
+    }
+
+    if (!application && ownerEmail) {
+      const existingByEmail = await db
+        .select()
+        .from(dealerOnboardingApplications)
+        .where(eq(dealerOnboardingApplications.ownerEmail, ownerEmail))
+        .limit(1);
+
+      if (existingByEmail.length > 0) {
+        application = existingByEmail[0];
+      }
     }
 
     if (!application && dealerCode) {
