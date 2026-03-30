@@ -183,6 +183,12 @@ export async function middleware(request: NextRequest) {
       path.startsWith("/dealer-onboarding") ||
       path.startsWith("/dealer-portal/onboarding-status");
 
+    // Allow onboarding routes through BEFORE dealer portal gating
+    // to prevent infinite redirect loop on /dealer-portal/onboarding-status
+    if (isDealerOnboardingRoute) {
+      return response;
+    }
+
     if (isDealerPortalRoute) {
       const isApprovedAndActive =
         onboardingStatus === "approved" && dealerAccountStatus === "active";
@@ -218,10 +224,6 @@ export async function middleware(request: NextRequest) {
 
       url.pathname = "/dealer-onboarding";
       return NextResponse.redirect(url);
-    }
-
-    if (isDealerOnboardingRoute) {
-      return response;
     }
   }
 
