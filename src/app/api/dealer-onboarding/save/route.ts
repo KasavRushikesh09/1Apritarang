@@ -231,11 +231,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Prevent overwriting an already-approved application
+    if (application && application.onboardingStatus === "approved") {
+      return NextResponse.json(
+        { success: false, message: "This application has already been approved and cannot be modified" },
+        { status: 409 }
+      );
+    }
+
     if (application) {
       const updatedApplications = await db
         .update(dealerOnboardingApplications)
         .set({
-          dealerUserId,
+          // Preserve existing dealerUserId if already linked by admin
+          dealerUserId: dealerUserId || application.dealerUserId,
           dealerCode,
           companyName,
           companyType,
