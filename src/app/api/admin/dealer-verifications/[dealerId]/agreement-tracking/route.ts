@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -16,29 +18,11 @@ export async function GET(_req: NextRequest, context: Context) {
   try {
     const { dealerId } = await context.params;
 
-    console.log("[AGREEMENT TRACKING] dealerId:", dealerId);
-
-    let applicationRows: any[] = [];
-
-    try {
-      applicationRows = await db
-        .select()
-        .from(dealerOnboardingApplications)
-        .where(eq(dealerOnboardingApplications.id, dealerId))
-        .limit(1);
-
-      console.log("[AGREEMENT TRACKING] application query success");
-    } catch (error: any) {
-      console.error("[AGREEMENT TRACKING] application query failed:", error);
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            error?.message || "Failed while loading dealer onboarding application",
-        },
-        { status: 500 }
-      );
-    }
+    const applicationRows = await db
+      .select()
+      .from(dealerOnboardingApplications)
+      .where(eq(dealerOnboardingApplications.id, dealerId))
+      .limit(1);
 
     const application = applicationRows[0];
 
@@ -49,29 +33,10 @@ export async function GET(_req: NextRequest, context: Context) {
       );
     }
 
-    let signerRows: any[] = [];
-
-    try {
-      signerRows = await db
-        .select()
-        .from(dealerAgreementSigners)
-        .where(eq(dealerAgreementSigners.applicationId, dealerId));
-
-      console.log(
-        "[AGREEMENT TRACKING] signer rows query success. Count:",
-        signerRows.length
-      );
-    } catch (error: any) {
-      console.error("[AGREEMENT TRACKING] signer rows query failed:", error);
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            error?.message || "Failed while loading agreement signer rows",
-        },
-        { status: 500 }
-      );
-    }
+    const signerRows = await db
+      .select()
+      .from(dealerAgreementSigners)
+      .where(eq(dealerAgreementSigners.applicationId, application.id));
 
     const signerOrder = [
       "dealer",
@@ -80,40 +45,37 @@ export async function GET(_req: NextRequest, context: Context) {
       "itarang_signatory_2",
     ];
 
-    const signers = [...signerRows].sort((a, b) => {
-      const aIndex = signerOrder.indexOf(a.signerRole);
-      const bIndex = signerOrder.indexOf(b.signerRole);
+    const signers = [...signerRows]
+      .sort((a, b) => {
+        const aIndex = signerOrder.indexOf(a.signerRole || "");
+        const bIndex = signerOrder.indexOf(b.signerRole || "");
+        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+      })
+      .map((signer) => ({
+        id: signer.id,
+        signerRole: signer.signerRole || "unknown",
+        signerName: signer.signerName || "Not available",
+        signerEmail: signer.signerEmail || null,
+        signerMobile: signer.signerMobile || null,
+        signingMethod: signer.signingMethod || null,
+        signerStatus: signer.signerStatus || "pending",
+        signedAt: signer.signedAt || null,
+        providerSigningUrl: signer.providerSigningUrl || null,
+      }));
 
-      const safeAIndex = aIndex === -1 ? 999 : aIndex;
-      const safeBIndex = bIndex === -1 ? 999 : bIndex;
+    const eventRows = await db
+      .select()
+      .from(dealerAgreementEvents)
+      .where(eq(dealerAgreementEvents.applicationId, application.id))
+      .orderBy(desc(dealerAgreementEvents.createdAt));
 
-      return safeAIndex - safeBIndex;
-    });
-
-    let events: any[] = [];
-
-    try {
-      events = await db
-        .select()
-        .from(dealerAgreementEvents)
-        .where(eq(dealerAgreementEvents.applicationId, dealerId))
-        .orderBy(desc(dealerAgreementEvents.createdAt));
-
-      console.log(
-        "[AGREEMENT TRACKING] event rows query success. Count:",
-        events.length
-      );
-    } catch (error: any) {
-      console.error("[AGREEMENT TRACKING] event rows query failed:", error);
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            error?.message || "Failed while loading agreement timeline events",
-        },
-        { status: 500 }
-      );
-    }
+    const timeline = eventRows.map((event) => ({
+      id: event.id,
+      eventType: event.eventType || "event",
+      signerRole: event.signerRole || null,
+      eventStatus: event.eventStatus || null,
+      createdAt: event.createdAt || null,
+    }));
 
     return NextResponse.json({
       success: true,
@@ -131,7 +93,7 @@ export async function GET(_req: NextRequest, context: Context) {
         lastActionTimestamp: application.lastActionTimestamp || null,
         canReInitiate: canReInitiateAgreement(application.agreementStatus),
         signers,
-        timeline: events,
+        timeline,
       },
     });
   } catch (error: any) {

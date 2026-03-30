@@ -72,8 +72,9 @@ export async function middleware(request: NextRequest) {
     path === "/favicon.ico";
 
   const isProtectedRoute =
-    Object.values(roleDashboards).some((dashboardPath) =>
-      path.startsWith(dashboardPath)
+    Object.values(roleDashboards).some(
+      (dashboardPath) =>
+        path === dashboardPath || path.startsWith(`${dashboardPath}/`)
     ) ||
     path.startsWith("/inventory") ||
     path.startsWith("/product-catalog") ||
@@ -140,21 +141,17 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Shared access routes
-  const sharedRouteAccess: Record<string, string[]> = {
-    "/admin/dealer-verification": ["admin", "sales_head", "business_head", "ceo"],
-  };
-
-  const allowedSharedRoles = Object.entries(sharedRouteAccess).find(
-    ([routePrefix]) => path.startsWith(routePrefix)
-  )?.[1];
-
-  if (allowedSharedRoles && allowedSharedRoles.includes(role)) {
-    return response;
+  // Explicit shared access for dealer verification pages
+  if (path === "/admin/dealer-verification" || path.startsWith("/admin/dealer-verification/")) {
+    if (["admin", "sales_head", "business_head", "ceo"].includes(role)) {
+      return response;
+    }
+    return NextResponse.redirect(new URL(myDashboard, request.url));
   }
 
-  const matchedRole = Object.entries(roleDashboards).find(([, dashboardPath]) =>
-    path.startsWith(dashboardPath)
+  const matchedRole = Object.entries(roleDashboards).find(
+    ([, dashboardPath]) =>
+      path === dashboardPath || path.startsWith(`${dashboardPath}/`)
   )?.[0];
 
   if (matchedRole && matchedRole !== role && role !== "ceo") {

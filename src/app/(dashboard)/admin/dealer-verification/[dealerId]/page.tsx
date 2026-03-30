@@ -547,26 +547,23 @@ export default function DealerReviewPage() {
 
   const handleAuditTrailDownload = async () => {
     try {
-      const res = await fetch(
-        `/api/admin/dealer-verifications/${dealerId}/audit-trail`,
-        { method: "POST" }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.message || "Failed to prepare audit trail");
+      if (!hasInitiatedAgreement) {
+        alert("Agreement has not been initiated yet.");
         return;
       }
 
-      // Now download
+      if (!isAgreementCompleted) {
+        alert("Audit trail available only after agreement completion.");
+        return;
+      }
+
       window.open(
-        `/api/admin/dealer-verifications/${dealerId}/fetch-audit-trail`,
+        `/api/admin/dealer-verifications/${dealerId}/audit-trail`,
         "_blank"
       );
-    } catch (err) {
-      console.error("Audit trail error:", err);
-      alert("Something went wrong while downloading audit trail");
+    } catch (error) {
+      console.error("Audit trail error:", error);
+      alert("Failed to download audit trail");
     }
   };
 
@@ -649,32 +646,32 @@ export default function DealerReviewPage() {
     }
   };
 
-  const handleOpenAuditTrail = async () => {
-    try {
-      if (!hasInitiatedAgreement) {
-        alert("Agreement has not been initiated yet. Please initiate agreement first.");
-        return;
-      }
+  // const handleOpenAuditTrail = async () => {
+  //   try {
+  //     if (!hasInitiatedAgreement) {
+  //       alert("Agreement has not been initiated yet. Please initiate agreement first.");
+  //       return;
+  //     }
 
-      if (!isAgreementCompleted) {
-        alert("Audit trail will be available only after all signers complete signing.");
-        return;
-      }
+  //     if (!isAgreementCompleted) {
+  //       alert("Audit trail will be available only after all signers complete signing.");
+  //       return;
+  //     }
 
-      setAuditTrailLoading(true);
+  //     setAuditTrailLoading(true);
 
-      window.open(
-        `/api/admin/dealer-verifications/${dealerId}/fetch-audit-trail?download=1`,
-        "_blank",
-        "noopener,noreferrer"
-      );
-    } catch (error) {
-      console.error("Failed to open audit trail", error);
-      alert("Audit trail is not available right now. Please check Digio dashboard.");
-    } finally {
-      setAuditTrailLoading(false);
-    }
-  };
+  //     window.open(
+  //       `/api/admin/dealer-verifications/${dealerId}/fetch-audit-trail?download=1`,
+  //       "_blank",
+  //       "noopener,noreferrer"
+  //     );
+  //   } catch (error) {
+  //     console.error("Failed to open audit trail", error);
+  //     alert("Audit trail is not available right now. Please check Digio dashboard.");
+  //   } finally {
+  //     setAuditTrailLoading(false);
+  //   }
+  // };
 
   const handleApprove = async () => {
     setSubmitting(true);
@@ -1003,49 +1000,29 @@ export default function DealerReviewPage() {
               </div>
 
               <div className="mt-5 flex flex-wrap gap-3">
-                {data.agreement?.copyUrl && !signedAgreementReady && (
-                  <Link
-                    href={data.agreement.copyUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                {(signedAgreementReady || tracking?.signedAgreementUrl) && (
+                  <button
+                    onClick={() =>
+                      window.open(
+                        `/api/admin/dealer-verifications/${dealerId}/download-signed-agreement`,
+                        "_blank"
+                      )
+                    }
+                    className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                   >
                     <Download className="h-4 w-4" />
-                    View / Download Agreement
-                  </Link>
+                    Download Signed Agreement
+                  </button>
                 )}
 
-                {(signedAgreementReady || !!tracking?.signedAgreementUrl || !!data?.agreement?.signedAgreementUrl) && (
-                  <>
-                    {data.agreement?.copyUrl && (
-                      <Link
-                        href={data.agreement.copyUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                      >
-                        <Download className="h-4 w-4" />
-                        View / Download Agreement
-                      </Link>
-                    )}
-
-                    <a
-                      href={signedAgreementDownloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
-                    >
-                      <Download className="h-4 w-4" />
-                      Signed Agreement
-                    </a>
-                  </>
-                )}
-
-                {!data.agreement?.copyUrl && !tracking?.agreementId && !data.agreement?.agreementId && (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                    Agreement copy is not available yet.
-                  </div>
-                )}
+                <button
+                  onClick={handleAuditTrailDownload}
+                  disabled={auditTrailLoading || isRejected || !isAgreementCompleted}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  {auditTrailLoading ? "Downloading Audit Trail..." : "Download Audit Trail"}
+                </button>
               </div>
 
               <div className="mt-5 flex flex-wrap gap-3">
@@ -1102,7 +1079,7 @@ export default function DealerReviewPage() {
                     </button>
                   )}
 
-                <button
+                {/* <button
                   onClick={handleOpenAuditTrail}
                   disabled={
                     auditTrailLoading ||
@@ -1113,7 +1090,7 @@ export default function DealerReviewPage() {
                 >
                   <FileText className="h-4 w-4" />
                   {auditTrailLoading ? "Opening Audit Trail..." : "Download Audit Trail"}
-                </button>
+                </button> */}
               </div>
 
               <div className="mt-8 rounded-[24px] border border-slate-200 bg-white shadow-sm">

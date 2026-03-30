@@ -1517,11 +1517,15 @@ export const dealerOnboardingApplications = pgTable("dealer_onboarding_applicati
     reviewStatus: varchar("review_status", { length: 50 }).default("draft"),
 
     agreementStatus: varchar("agreement_status", { length: 50 }).default("not_generated"),
-
     requestId: text("request_id"),
     providerDocumentId: text("provider_document_id"),
     providerSigningUrl: text("provider_signing_url"),
     providerRawResponse: jsonb("provider_raw_response"),
+
+    signedAgreementUrl: text("signed_agreement_url"),
+    auditTrailUrl: text("audit_trail_url"),
+    signedAgreementStoragePath: text("signed_agreement_storage_path"),
+    auditTrailStoragePath: text("audit_trail_storage_path"),
 
     signedAt: timestamp("signed_at"),
     lastActionTimestamp: timestamp("last_action_timestamp"),
@@ -1538,11 +1542,6 @@ export const dealerOnboardingApplications = pgTable("dealer_onboarding_applicati
     dealerCode: text("dealer_code"),
 
     submittedAt: timestamp("submitted_at"),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
-    ///////
-    signedAgreementUrl: text("signed_agreement_url"),
-    auditTrailUrl: text("audit_trail_url"),
 
     agreementLastInitiatedAt: timestamp("agreement_last_initiated_at"),
     agreementExpiredAt: timestamp("agreement_expired_at"),
@@ -1550,6 +1549,8 @@ export const dealerOnboardingApplications = pgTable("dealer_onboarding_applicati
     agreementFailureReason: text("agreement_failure_reason"),
     agreementCompletedAt: timestamp("agreement_completed_at"),
 
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const dealerAgreementSigners = pgTable("dealer_agreement_signers", {

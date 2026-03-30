@@ -115,10 +115,14 @@ function extractProviderDocumentId(data: any) {
     data?.provider_document_id,
     data?.documentId,
     data?.document_id,
+    data?.id,                 // VERY IMPORTANT
+    data?.agreement_id,       // VERY IMPORTANT
+    data?.agreement?.id,
     data?.agreement?.documentId,
     data?.agreement?.document_id,
     data?.raw?.documentId,
-    data?.raw?.document_id
+    data?.raw?.document_id,
+    data?.raw?.id
   );
 }
 
@@ -448,8 +452,9 @@ export async function POST(
 
     const responseData = digioJson?.data || {};
 
-    const providerDocumentId = extractProviderDocumentId(responseData);
     const requestId = extractRequestId(responseData);
+    const providerDocumentId =
+      extractProviderDocumentId(responseData) || requestId || null;
     const signingUrl = extractSigningUrl(responseData);
     const stampStatus = extractStampStatus(responseData) || "pending";
     const agreementStatus = extractAgreementStatus(responseData);
