@@ -11,6 +11,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useOnboardingStore } from "@/store/onboardingStore";
+import { createClient } from "@/lib/supabase/client";
 
 function ReviewCard({
   title,
@@ -156,6 +157,7 @@ function getPrimaryContact(state: ReturnType<typeof useOnboardingStore.getState>
 
 export default function StepReview() {
   const router = useRouter();
+  const supabase = createClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const state = useOnboardingStore();
@@ -254,7 +256,7 @@ export default function StepReview() {
       setIsSubmitting(true);
 
       const payload = {
-        dealerUserId: state.dealerId || null,
+        // dealerUserId: state.dealerId || null,
         companyName: state.company?.companyName || "",
         companyType: state.company?.companyType || "",
         gstNumber: state.company?.gstNumber || "",
@@ -267,7 +269,7 @@ export default function StepReview() {
         },
         financeEnabled: state.finance?.enableFinance === "yes",
         onboardingStatus: "submitted",
-        reviewStatus: "pending_sales_head",
+        reviewStatus: "pending_admin_review",
 
         ownerName: primaryContact.ownerName,
         ownerPhone: primaryContact.ownerPhone,
@@ -322,6 +324,8 @@ export default function StepReview() {
 
       const response = await fetch("/api/dealer-onboarding/save", {
         method: "POST",
+        credentials: "include",
+        cache: "no-store",
         headers: {
           "Content-Type": "application/json",
         },
@@ -342,7 +346,11 @@ export default function StepReview() {
       console.log("Dealer onboarding saved in DB:", result.application);
       console.log("Dealer onboarding completed with ID:", generatedDealerId);
 
-      router.push("/dealer-portal/onboarding-status");
+      await supabase.auth.signOut();
+      router.push("/login");
+      router.refresh();
+
+      return;
     } catch (error) {
       console.error("Dealer onboarding submission error:", error);
       setErrors({
@@ -393,7 +401,7 @@ export default function StepReview() {
         </div>
       </div>
 
-      {agreementRequired && !agreementAlreadyCompleted  && (
+      {agreementRequired && !agreementAlreadyCompleted && (
         <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

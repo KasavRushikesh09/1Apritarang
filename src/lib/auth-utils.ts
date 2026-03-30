@@ -2,16 +2,26 @@ import { db } from "./db";
 import { users, dealerOnboardingApplications } from "./db/schema";
 import { eq, desc } from "drizzle-orm";
 import { createClient } from "./supabase/server";
-import { redirect } from "next/navigation";
+
+export class AuthError extends Error {
+  status: number;
+
+  constructor(message = "Unauthorized", status = 401) {
+    super(message);
+    this.name = "AuthError";
+    this.status = status;
+  }
+}
 
 export async function requireAuth() {
   const supabase = await createClient();
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect("/login");
+  if (error || !user) {
+    throw new AuthError("Unauthorized", 401);
   }
 
   try {
@@ -53,7 +63,6 @@ export async function requireAuth() {
       };
     }
 
-    // For dealer users, also return onboarding/account status
     if (dbUser.role === "dealer") {
       const onboarding =
         (
@@ -94,7 +103,7 @@ export async function requireRole(roles: string[]) {
   const user = await requireAuth();
 
   if (!roles.includes(user.role)) {
-    throw new Error("Forbidden: Insufficient permissions");
+    throw new AuthError("Forbidden: Insufficient permissions", 403);
   }
 
   return user;

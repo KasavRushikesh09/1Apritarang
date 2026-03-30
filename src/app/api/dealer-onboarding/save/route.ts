@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { createServerClient } from "@supabase/ssr";
+
 import { db } from "@/lib/db/index";
 import {
   dealerOnboardingApplications,
@@ -43,19 +45,52 @@ function cleanObject(value: unknown): SafeRecord {
 }
 
 export async function POST(req: NextRequest) {
+  const response = NextResponse.next();
+
   try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return req.cookies.get(name)?.value;
+          },
+          set(name: string, value: string, options: Record<string, any>) {
+            response.cookies.set({ name, value, ...options });
+          },
+          remove(name: string, options: Record<string, any>) {
+            response.cookies.set({ name, value: "", ...options, maxAge: 0 });
+          },
+        },
+      }
+    );
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { success: false, message: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
 
-    const dealerUserId: string | null =
-      typeof body.dealerUserId === "string" && body.dealerUserId.trim()
-        ? body.dealerUserId.trim()
-        : null;
+    const dealerUserId = user.id;
+    const dealerCode =
+      cleanString(body.dealerCode) ||
+      cleanString(body.dealer_id) ||
+      cleanString(body.dealerId) ||
+      null;
 
     const companyName = cleanString(body.companyName);
     const companyType = cleanString(body.companyType);
     const gstNumber = cleanString(body.gstNumber);
     const panNumber = cleanString(body.panNumber);
-    const cinNumber = cleanString(body.cinNumber);
 
     const businessAddress = cleanObject(body.businessAddress);
     const registeredAddress = cleanObject(body.registeredAddress);
@@ -65,7 +100,7 @@ export async function POST(req: NextRequest) {
       body.onboardingStatus === "submitted" ? "submitted" : "draft";
 
     const reviewStatus =
-      onboardingStatus === "submitted" ? "pending_sales_head" : null;
+      onboardingStatus === "submitted" ? "pending_admin_review" : "draft";
 
     const ownerName = cleanString(body.ownerName);
     const ownerPhone = cleanPhone(body.ownerPhone);
@@ -86,8 +121,13 @@ export async function POST(req: NextRequest) {
       cleanObject(agreementConfig["salesManager"]) ||
       cleanObject(body["salesManager"]);
 
-    const itarangSignatory1 = cleanObject(agreementConfig["itarangSignatory1"]);
-    const itarangSignatory2 = cleanObject(agreementConfig["itarangSignatory2"]);
+    const itarangSignatory1 =
+      cleanObject(agreementConfig["itarangSignatory1"]) ||
+      cleanObject(body["itarangSignatory1"]);
+
+    const itarangSignatory2 =
+      cleanObject(agreementConfig["itarangSignatory2"]) ||
+      cleanObject(body["itarangSignatory2"]);
 
     const salesManagerName = cleanString(
       salesManager["name"] ?? salesManager["salesManagerName"]
@@ -95,15 +135,15 @@ export async function POST(req: NextRequest) {
 
     const salesManagerEmail = cleanEmail(
       salesManager["email"] ??
-      salesManager["emailId"] ??
-      salesManager["salesManagerEmail"]
+        salesManager["emailId"] ??
+        salesManager["salesManagerEmail"]
     );
 
     const salesManagerMobile = cleanPhone(
       salesManager["mobile"] ??
-      salesManager["phone"] ??
-      salesManager["contactNumber"] ??
-      salesManager["salesManagerMobile"]
+        salesManager["phone"] ??
+        salesManager["contactNumber"] ??
+        salesManager["salesManagerMobile"]
     );
 
     const itarangSignatory1Name = cleanString(itarangSignatory1["name"]);
@@ -113,16 +153,11 @@ export async function POST(req: NextRequest) {
     const itarangSignatory2Name = cleanString(itarangSignatory2["name"]);
     const itarangSignatory2Email = cleanEmail(itarangSignatory2["email"]);
     const itarangSignatory2Mobile = cleanPhone(itarangSignatory2["mobile"]);
-    
-    console.log("SAVE ROUTE FULL AGREEMENT:", JSON.stringify(agreementConfig, null, 2));
-    console.log("SAVE ROUTE SALES MANAGER RAW:", JSON.stringify(salesManager, null, 2));
-    console.log("SAVE ROUTE SALES MANAGER NAME:", salesManagerName);
-    console.log("SAVE ROUTE SALES MANAGER EMAIL:", salesManagerEmail);
-    console.log("SAVE ROUTE SALES MANAGER MOBILE:", salesManagerMobile);
-    console.log("SAVE ROUTE SIGNATORY 1 EMAIL:", itarangSignatory1Email);
-    console.log("SAVE ROUTE SIGNATORY 2 EMAIL:", itarangSignatory2Email);
-    console.log("SAVE ROUTE dealerUserId:", dealerUserId);
-    
+
+    console.log("SAVE ROUTE AUTH USER ID:", dealerUserId);
+    console.log("SAVE ROUTE COMPANY NAME:", companyName);
+    console.log("SAVE ROUTE REVIEW STATUS:", reviewStatus);
+
     if (!companyName) {
       return NextResponse.json(
         { success: false, message: "Company name is required" },
@@ -165,85 +200,98 @@ export async function POST(req: NextRequest) {
     let application: typeof dealerOnboardingApplications.$inferSelect | null =
       null;
 
-    if (dealerUserId) {
-      const existing = await db
+    const existing = await db
+      .select()
+      .from(dealerOnboardingApplications)
+      .where(eq(dealerOnboardingApplications.dealerUserId, dealerUserId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      application = existing[0];
+    }
+
+    if (!application && dealerCode) {
+      const existingByCode = await db
         .select()
         .from(dealerOnboardingApplications)
-        .where(eq(dealerOnboardingApplications.dealerUserId, dealerUserId))
+        .where(eq(dealerOnboardingApplications.dealerCode, dealerCode))
         .limit(1);
 
-      if (existing.length > 0) {
-        const updatedApplications = await db
-          .update(dealerOnboardingApplications)
-          .set({
-            companyName,
-            companyType,
-            gstNumber,
-            panNumber,
-            cinNumber,
-            businessAddress,
-            registeredAddress,
-            financeEnabled,
-            onboardingStatus,
-            reviewStatus,
-            submittedAt: onboardingStatus === "submitted" ? new Date() : null,
-            ownerName,
-            ownerPhone,
-            ownerEmail,
-            bankName,
-            accountNumber,
-            beneficiaryName,
-            ifscCode,
-            updatedAt: new Date(),
-
-            salesManagerName,
-            salesManagerEmail,
-            salesManagerMobile,
-
-            itarangSignatory1Name,
-            itarangSignatory1Email,
-            itarangSignatory1Mobile,
-
-            itarangSignatory2Name,
-            itarangSignatory2Email,
-            itarangSignatory2Mobile,
-
-            agreementStatus:
-              onboardingStatus === "submitted"
-                ? "not_generated"
-                : (typeof agreementConfig["agreementStatus"] === "string" &&
-                  agreementConfig["agreementStatus"]) ||
-                "not_generated",
-
-            providerSigningUrl: null,
-            providerDocumentId: null,
-            requestId: null,
-
-            providerRawResponse: {
-              agreement: agreementConfig,
-            },
-
-            stampStatus: "pending",
-            completionStatus: "pending",
-            lastActionTimestamp: new Date(),
-          })
-          .where(eq(dealerOnboardingApplications.id, existing[0].id))
-          .returning();
-
-        application = updatedApplications[0] ?? null;
+      if (existingByCode.length > 0) {
+        application = existingByCode[0];
       }
     }
 
-    if (!application) {
-      const insertedApplications = await db
-        .insert(dealerOnboardingApplications)
-        .values({
+    if (application) {
+      const updatedApplications = await db
+        .update(dealerOnboardingApplications)
+        .set({
           dealerUserId,
+          dealerCode,
           companyName,
           companyType,
           gstNumber,
           panNumber,
-          cinNumber,
+          businessAddress,
+          registeredAddress,
+          financeEnabled,
+          onboardingStatus,
+          reviewStatus,
+          submittedAt: onboardingStatus === "submitted" ? new Date() : null,
+          ownerName,
+          ownerPhone,
+          ownerEmail,
+          bankName,
+          accountNumber,
+          beneficiaryName,
+          ifscCode,
+          updatedAt: new Date(),
+
+          salesManagerName,
+          salesManagerEmail,
+          salesManagerMobile,
+
+          itarangSignatory1Name,
+          itarangSignatory1Email,
+          itarangSignatory1Mobile,
+
+          itarangSignatory2Name,
+          itarangSignatory2Email,
+          itarangSignatory2Mobile,
+
+          agreementStatus:
+            onboardingStatus === "submitted"
+              ? "not_generated"
+              : (typeof agreementConfig["agreementStatus"] === "string" &&
+                  agreementConfig["agreementStatus"]) ||
+                "not_generated",
+
+          providerSigningUrl: null,
+          providerDocumentId: null,
+          requestId: null,
+
+          providerRawResponse: {
+            agreement: agreementConfig,
+          },
+
+          stampStatus: "pending",
+          completionStatus: "pending",
+          lastActionTimestamp: new Date(),
+        })
+        .where(eq(dealerOnboardingApplications.id, application.id))
+        .returning();
+
+      application = updatedApplications[0] ?? null;
+    } else {
+      const insertedApplications = await db
+        .insert(dealerOnboardingApplications)
+        .values({
+          dealerUserId,
+          dealerCode,
+          companyName,
+          companyType,
+          gstNumber,
+          panNumber,
           businessAddress,
           registeredAddress,
           financeEnabled,
@@ -277,6 +325,7 @@ export async function POST(req: NextRequest) {
           agreementStatus: "not_generated",
           stampStatus: "pending",
           completionStatus: "pending",
+          lastActionTimestamp: new Date(),
         })
         .returning();
 
@@ -327,8 +376,8 @@ export async function POST(req: NextRequest) {
               : "pending",
           metadata:
             doc["metadata"] &&
-              typeof doc["metadata"] === "object" &&
-              !Array.isArray(doc["metadata"])
+            typeof doc["metadata"] === "object" &&
+            !Array.isArray(doc["metadata"])
               ? (doc["metadata"] as Record<string, unknown>)
               : {},
         }));
