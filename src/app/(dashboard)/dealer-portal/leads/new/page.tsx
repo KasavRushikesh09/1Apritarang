@@ -695,7 +695,7 @@ function NewLeadWizardContent() {
             </div>
 
             {/* MODALS - These render nothing if not open, preventing invisible overlays */}
-            <OCRModal isOpen={showOCR} onClose={() => setShowOCR(false)} onResult={(data: any) => {
+            <OCRModal isOpen={showOCR} onClose={() => setShowOCR(false)} leadId={leadId} onResult={(data: any) => {
                 setFormData((p: any) => ({ ...p, ...data }));
                 setIsModified(true);
             }} />
@@ -830,31 +830,56 @@ function HelpModal({ isOpen, onClose }: any) {
     );
 }
 
-function OCRModal({ isOpen, onClose, onResult }: any) {
-    const [status, setStatus] = useState<'idle' | 'scanning' | 'error'>('idle');
+function OCRModal({ isOpen, onClose, onResult, leadId }: any) {
+    const [status, setStatus] = useState<'idle' | 'uploading' | 'scanning' | 'done' | 'error'>('idle');
     const [msg, setMsg] = useState('');
+    const [progress, setProgress] = useState(0);
 
     if (!isOpen) return null;
+
+    const checkImageQuality = async (file: File) => {
+        if (file.type === 'application/pdf') return true; // skip dimension check for pdf
+        return new Promise<boolean>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve(img.width >= 600 && img.height >= 600);
+            img.onerror = () => resolve(false);
+            img.src = URL.createObjectURL(file);
+        });
+    };
 
     const handleScan = async () => {
         const front = (document.getElementById('aadhaarFront') as HTMLInputElement).files?.[0];
         const back = (document.getElementById('aadhaarBack') as HTMLInputElement).files?.[0];
         if (!front || !back) { setMsg("Upload both sides to continue"); return; }
 
-        setStatus('scanning');
         setMsg('');
+        const [okFront, okBack] = await Promise.all([checkImageQuality(front), checkImageQuality(back)]);
+        if (!okFront || !okBack) {
+            setStatus('error');
+            setMsg('Image quality too low (min 600px). Please reupload clearer images.');
+            return;
+        }
+
+        setStatus('uploading');
+        setProgress(25);
 
         const body = new FormData();
         body.append('aadhaarFront', front);
         body.append('aadhaarBack', back);
+        if (leadId) body.append('leadId', leadId);
+        body.append('idType', 'aadhaar');
 
         try {
+            setProgress(45);
+            setStatus('scanning');
             const res = await fetch('/api/leads/autofillRequest', { method: 'POST', body });
             const data = await res.json();
             if (res.ok) {
+                setProgress(100);
                 onResult(data.data);
-                onClose();
-                setStatus('idle');
+                setStatus('done');
+                setMsg('Auto-filled from Aadhaar');
+                setTimeout(() => { setStatus('idle'); setProgress(0); onClose(); }, 800);
             } else {
                 setMsg(data.error?.message || "Service error");
                 setStatus('error');
@@ -877,10 +902,10 @@ function OCRModal({ isOpen, onClose, onResult }: any) {
                 </div>
 
                 <div className="p-10 space-y-8 relative">
-                    {status === 'scanning' && (
+                    {(status === 'scanning' || status === 'uploading') && (
                         <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
                             <Loader2 className="w-12 h-12 text-[#0047AB] animate-spin mb-4" />
-                            <p className="text-xl font-bold text-gray-900">Processing......</p>
+                            <p className="text-xl font-bold text-gray-900">{status === 'uploading' ? 'Uploading…' : 'Processing…'}</p>
                         </div>
                     )}
 
@@ -899,18 +924,31 @@ function OCRModal({ isOpen, onClose, onResult }: any) {
                         ))}
                     </div>
 
-                    {msg && <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold border border-red-100 animate-in shake duration-300 text-center">{msg}</div>}
+                    {progress > 0 && (
+                        <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                            <div className="h-2 bg-[#0047AB] transition-all" style={{ width: `${progress}%` }} />
+                        </div>
+                    )}
+
+                    {msg && (
+                        <div className={`p-4 rounded-2xl text-xs font-bold border text-center ${status === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                            {msg}
+                        </div>
+                    )}
                 </div>
 
                 <div className="px-10 py-8 bg-gray-50 flex gap-4">
                     <button onClick={onClose} className="flex-1 py-4 text-sm font-semibold text-gray-400 hover:text-gray-700">Cancel</button>
                     <button
                         onClick={handleScan}
-                        disabled={status === 'scanning'}
-                        className="flex-[2] py-4 bg-[#0047AB] text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all"
+                        disabled={status === 'scanning' || status === 'uploading'}
+                        className="flex-[2] py-4 bg-[#0047AB] text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all disabled:opacity-60"
                     >
-                        Start Scanning
+                        {status === 'scanning' || status === 'uploading' ? 'Processing…' : 'Start Scanning'}
                     </button>
+                    {status === 'error' && (
+                        <button onClick={handleScan} className="flex-1 py-4 text-sm font-semibold text-gray-600 hover:text-gray-900 border border-gray-200 rounded-2xl">Retry</button>
+                    )}
                 </div>
             </div>
         </div>

@@ -1,11 +1,12 @@
 export const runtime = "nodejs";
 
 import { db } from '@/lib/db';
-import { auditLogs } from '@/lib/db/schema';
+import { auditLogs, kycDocuments } from '@/lib/db/schema';
 import { successResponse, errorResponse, withErrorHandler } from '@/lib/api-utils';
 import { requireRole } from '@/lib/auth-utils';
 import { extractTextFromImageBuffer } from '@/lib/ocr/tesseractOcr';
 import { parseAadhaarText } from '@/lib/ocr/aadhaarParser';
+import { createClient } from '@/lib/supabase/server';
 
 export const POST = withErrorHandler(async (req: Request) => {
     const user = await requireRole(['dealer']);
@@ -19,6 +20,9 @@ export const POST = withErrorHandler(async (req: Request) => {
 
     const aadhaarFront = formData.get('aadhaarFront') as File | null;
     const aadhaarBack = formData.get('aadhaarBack') as File | null;
+    const leadId = (formData.get('leadId') as string | null) || null;
+    const idType = (formData.get('idType') as string | null) || 'aadhaar';
+    const idValue = (formData.get('idValue') as string | null) || null;
 
     if (!aadhaarFront || !aadhaarBack) {
         return errorResponse("Both Aadhaar Front and Back images are required", 400);
@@ -30,17 +34,49 @@ export const POST = withErrorHandler(async (req: Request) => {
         return errorResponse("File size exceeds 5MB limit", 400);
     }
 
-    // PDF Support: Disabled for now, returns 415.
-    if (aadhaarFront.type === 'application/pdf' || aadhaarBack.type === 'application/pdf') {
-        return errorResponse("PDF OCR not supported yet. Please upload JPG/PNG.", 415);
-    }
-
-    const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+    const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
     if (!ALLOWED_TYPES.includes(aadhaarFront.type) || !ALLOWED_TYPES.includes(aadhaarBack.type)) {
-        return errorResponse("Invalid file type. Allowed: PNG, JPEG, JPG", 400);
+        return errorResponse("Invalid file type. Allowed: PNG, JPEG, JPG, PDF", 400);
     }
 
     const requestId = `OCR-${Date.now()}`;
+
+    // Optional: persist uploads to storage + DB when a leadId is present
+    const supabase = await createClient();
+    const uploadDoc = async (file: File, docType: 'aadhaar_front' | 'aadhaar_back') => {
+        if (!leadId) return null;
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const ext = file.name.split('.').pop() || 'bin';
+        const fileName = `autofill/${leadId}/${docType}_${Date.now()}.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('documents')
+            .upload(fileName, buffer, { contentType: file.type, upsert: true });
+        if (uploadError) {
+            throw new Error(`Upload failed: ${uploadError.message}`);
+        }
+
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+        const seq = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+        const docId = `KYCDOC-${dateStr}-${seq}`;
+
+        await db.insert(kycDocuments).values({
+            id: docId,
+            lead_id: leadId,
+            doc_type: docType,
+            file_url: urlData.publicUrl,
+            file_name: file.name,
+            file_size: file.size,
+            verification_status: 'pending',
+            uploaded_at: now,
+            updated_at: now,
+        }).onConflictDoNothing();
+
+        return urlData.publicUrl;
+    };
 
     // 1. Initial Audit Log
     try {
@@ -58,7 +94,18 @@ export const POST = withErrorHandler(async (req: Request) => {
     }
 
     try {
-        // 2. Process Images (Sequential to avoid worker contention)
+        // 2. Persist files if leadId present (non-blocking for OCR)
+        let frontUrl: string | null = null;
+        let backUrl: string | null = null;
+        try {
+            frontUrl = await uploadDoc(aadhaarFront, 'aadhaar_front');
+            backUrl = await uploadDoc(aadhaarBack, 'aadhaar_back');
+        } catch (uploadErr) {
+            console.error("Autofill upload failed:", uploadErr);
+            // continue with OCR even if upload fails
+        }
+
+        // 3. Process Images (Sequential to avoid worker contention)
         const frontBuffer = Buffer.from(await aadhaarFront.arrayBuffer());
         const backBuffer = Buffer.from(await aadhaarBack.arrayBuffer());
 
@@ -67,7 +114,7 @@ export const POST = withErrorHandler(async (req: Request) => {
 
         const combinedText = `${frontText}\n${backText}`.trim();
 
-        // 3. Length / Quality Check
+        // 4. Length / Quality Check
         if (combinedText.length < 20) {
             try {
                 await db.insert(auditLogs).values({
@@ -85,7 +132,7 @@ export const POST = withErrorHandler(async (req: Request) => {
 
         const parsedData = parseAadhaarText(combinedText);
 
-        // 4. Success Audit Log
+        // 5. Success Audit Log
         try {
             await db.insert(auditLogs).values({
                 id: `AUDIT-OK-${requestId}`,
@@ -105,19 +152,25 @@ export const POST = withErrorHandler(async (req: Request) => {
         // Return mapped keys for direct form compatibility
         return successResponse({
             requestId,
+            frontUrl,
+            backUrl,
             fullName: parsedData.fullName ?? "",
             fatherName: parsedData.fatherName ?? "",
             dob: parsedData.dob ?? "",
             address: parsedData.address ?? "",
+            phone: parsedData.phone ?? "",
             full_name: parsedData.fullName ?? "",
             father_or_husband_name: parsedData.fatherName ?? "",
-            current_address: parsedData.address ?? ""
+            current_address: parsedData.address ?? "",
+            autoFilled: true,
+            idType,
+            idValue
         });
 
     } catch (err: any) {
         console.error("OCR Final Error:", err?.message, err?.stack);
 
-        // 5. Failure Audit Log (Always log failure on exception)
+        // 6. Failure Audit Log (Always log failure on exception)
         try {
             await db.insert(auditLogs).values({
                 id: `AUDIT-ERR-${requestId}`,
