@@ -64,7 +64,13 @@ type DealerDashboardData = {
 type LeadItem = {
   id: string;
   owner_name?: string | null;
+  owner_contact?: string | null;
   interest_level?: string | null;
+  lead_status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  current_address?: string | null;
+  payment_method?: string | null;
 };
 
 type ExtendedAuthUser = {
@@ -205,6 +211,7 @@ export default function DealerDashboard() {
   const [loading, setLoading] = useState(true);
   const [dealerData, setDealerData] = useState<DealerDashboardData | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<LeadItem | null>(null);
 
   useEffect(() => {
     const savedDealerData = localStorage.getItem('dealerDashboardData');
@@ -292,12 +299,12 @@ export default function DealerDashboard() {
         ? 'Yes'
         : 'No'
       : typeof currentUser?.finance_enabled === 'boolean'
-      ? currentUser.finance_enabled
-        ? 'Yes'
-        : 'No'
-      : dealerData?.financeEnabled?.toLowerCase() === 'yes'
-      ? 'Yes'
-      : 'No';
+        ? currentUser.finance_enabled
+          ? 'Yes'
+          : 'No'
+        : dealerData?.financeEnabled?.toLowerCase() === 'yes'
+          ? 'Yes'
+          : 'No';
 
   const submittedAtValue =
     dealer?.submittedAt ||
@@ -393,6 +400,13 @@ export default function DealerDashboard() {
         dealerCode={dealer?.dealerCode || currentDealerId}
         approvedAt={dealer?.approvedAt || null}
       />
+
+      {selectedLead && (
+        <RecentLeadModal
+          lead={selectedLead}
+          onClose={() => setSelectedLead(null)}
+        />
+      )}
 
       <div>
         <h1 className="text-2xl font-bold text-gray-900">
@@ -706,7 +720,13 @@ export default function DealerDashboard() {
               ) : (
                 <div className="space-y-1">
                   {stats.recentLeads.length > 0 ? (
-                    stats.recentLeads.map((lead) => <LeadRow key={lead.id} lead={lead} />)
+                    stats.recentLeads.map((lead) => (
+                      <LeadRow
+                        key={lead.id}
+                        lead={lead}
+                        onClick={() => setSelectedLead(lead)}
+                      />
+                    ))
                   ) : (
                     <>
                       <MockLeadRow
@@ -743,6 +763,173 @@ export default function DealerDashboard() {
       )}
     </div>
   );
+}
+
+function RecentLeadModal({
+  lead,
+  onClose,
+}: {
+  lead: LeadItem;
+  onClose: () => void;
+}) {
+  const lastTouch = lead.updated_at || lead.created_at;
+  const inactiveDays = lastTouch
+    ? Math.floor((Date.now() - new Date(lastTouch).getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+  const overSevenDays = inactiveDays > 7;
+
+  const timeline = [
+    { label: 'Lead created', value: formatLeadDate(lead.created_at), done: true },
+    { label: 'Latest update', value: formatLeadDate(lead.updated_at || lead.created_at), done: !!lastTouch },
+    { label: 'Current status', value: formatLeadLabel(lead.lead_status || 'new'), done: true },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-4xl overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-100 px-8 py-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#1F5C8F]">
+              Recent Lead Snapshot
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-900">
+              {lead.owner_name || 'Unnamed Lead'}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Customer profile, timeline, and workflow quick actions
+            </p>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="rounded-2xl border border-slate-200 p-3 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+          >
+            <XCircle className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-6 p-8 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="space-y-6">
+            {overSevenDays && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-amber-100 p-2 text-amber-700">
+                    <AlertCircle className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">
+                      Last contact is older than 7 days
+                    </p>
+                    <p className="mt-1 text-sm text-amber-800">
+                      This lead may need immediate follow-up to avoid drop-off.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <LeadInfoCard label="Lead ID" value={lead.id} />
+              <LeadInfoCard label="Phone" value={lead.owner_contact || 'Not captured'} />
+              <LeadInfoCard label="Interest Level" value={formatLeadLabel(lead.interest_level || 'new')} />
+              <LeadInfoCard label="Payment Method" value={formatLeadLabel(lead.payment_method || 'pending')} />
+            </div>
+
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Lead workflow timeline</h3>
+                  <p className="text-sm text-slate-500">Quick context for customer handling</p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                  {inactiveDays <= 0 ? 'Updated today' : `${inactiveDays} day${inactiveDays === 1 ? '' : 's'} ago`}
+                </span>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {timeline.map((item) => (
+                  <div key={item.label} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`h-2.5 w-2.5 rounded-full ${item.done ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                      <p className="text-sm font-medium text-slate-800">{item.label}</p>
+                    </div>
+                    <p className="text-sm text-slate-500">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="rounded-[28px] border border-[#D9E8F6] bg-gradient-to-br from-[#F5FAFF] to-white p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#1F5C8F]">
+                Status Summary
+              </p>
+              <div className="mt-4 flex items-center gap-3">
+                <div className="rounded-2xl bg-white p-3 text-[#1F5C8F] shadow-sm">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-slate-900">
+                    {formatLeadLabel(lead.lead_status || 'new')}
+                  </p>
+                  <p className="text-sm text-slate-500">Current workflow status</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+              <h3 className="text-lg font-bold text-slate-900">Quick actions</h3>
+              <div className="mt-4 space-y-3">
+                <Link
+                  href={`/dealer-portal/leads?new=${lead.id}`}
+                  className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  View Lead
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+
+                <Link
+                  href={`/dealer-portal/leads?new=${lead.id}`}
+                  className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Edit Lead
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+
+                <button
+                  onClick={onClose}
+                  className="w-full rounded-2xl bg-[#1F5C8F] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#173F63]"
+                >
+                  Back to Dashboard
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeadInfoCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-2 text-sm font-semibold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function formatLeadDate(value?: string | null) {
+  if (!value) return 'Not available';
+  return new Date(value).toLocaleString();
+}
+
+function formatLeadLabel(value: string) {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 const TruckStart = ({ className }: { className?: string }) => (
@@ -891,7 +1078,13 @@ function MockLeadRow({
   );
 }
 
-function LeadRow({ lead }: { lead: LeadItem }) {
+function LeadRow({
+  lead,
+  onClick,
+}: {
+  lead: LeadItem;
+  onClick: () => void;
+}) {
   const getStatusColor = (status: string) => {
     switch ((status || '').toLowerCase()) {
       case 'hot':
@@ -906,9 +1099,10 @@ function LeadRow({ lead }: { lead: LeadItem }) {
   };
 
   return (
-    <Link
-      href={`/dealer-portal/leads?new=${lead.id}`}
-      className="group flex cursor-pointer items-center justify-between rounded-xl p-4 transition-colors hover:bg-gray-50"
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full cursor-pointer items-center justify-between rounded-xl p-4 text-left transition-colors hover:bg-gray-50"
     >
       <div className="flex items-center gap-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-sm font-bold uppercase text-brand-600">
@@ -916,6 +1110,7 @@ function LeadRow({ lead }: { lead: LeadItem }) {
         </div>
         <div>
           <p className="font-medium text-gray-900">{lead.owner_name || 'Unnamed Lead'}</p>
+          <p className="text-sm text-gray-500">{lead.id}</p>
         </div>
       </div>
       <span
@@ -925,6 +1120,6 @@ function LeadRow({ lead }: { lead: LeadItem }) {
       >
         {lead.interest_level || 'New'}
       </span>
-    </Link>
+    </button>
   );
 }
