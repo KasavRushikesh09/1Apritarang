@@ -5,13 +5,13 @@ import { kycVerifications } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { aadhaarValidateOtp } from '@/lib/decentro';
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-        const { leadId } = await params;
+        const { leadId } = params;
         const { decentro_txn_id, otp } = await req.json();
 
         if (!decentro_txn_id || !otp) {

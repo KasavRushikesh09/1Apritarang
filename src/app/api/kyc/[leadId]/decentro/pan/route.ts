@@ -16,13 +16,13 @@ function nameSimilarity(a: string, b: string): number {
     return Math.round((intersection / union) * 100);
 }
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-        const { leadId } = await params;
+        const { leadId } = params;
         const { pan_number, dob, document_type = 'PAN' } = await req.json();
 
         if (!pan_number) {

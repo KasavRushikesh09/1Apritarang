@@ -5,9 +5,9 @@ import { eq, desc } from 'drizzle-orm';
 import { createClient } from '@/lib/supabase/server';
 
 // POST - Record manual payment (UTR / screenshot)
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -65,9 +65,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ lea
 }
 
 // GET - Check facilitation fee status
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function GET(_req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
 
         const rows = await db.select()
             .from(facilitationPayments)

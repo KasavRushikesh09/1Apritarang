@@ -1,38 +1,67 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { leads } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+export const runtime = "nodejs";
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
-    try {
-        const { leadId } = await params;
-        const lead = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { leads } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { requireRole } from "@/lib/auth-utils";
 
-        if (!lead.length) {
-            return NextResponse.json({ success: false, allowed: false, message: 'Lead not found' });
-        }
+type RouteContext = {
+  params: Promise<{ leadId: string }>;
+};
 
-        const l = lead[0];
+export async function GET(_req: Request, context: RouteContext) {
+  try {
+    await requireRole(["dealer"]);
 
-        // Access condition: lead must exist and be a hot lead
-        const allowed = l.interest_level === 'hot' && l.status !== 'ABANDONED';
+    const { leadId } = await context.params;
 
-        return NextResponse.json({
-            success: true,
-            allowed,
-            lead: allowed ? {
-                id: l.id,
-                reference_id: l.reference_id,
-                full_name: l.full_name,
-                phone: l.phone,
-                asset_model: l.asset_model,
-                payment_method: l.payment_method,
-                consent_status: l.consent_status,
-                kyc_status: l.kyc_status,
-                workflow_step: l.workflow_step,
-            } : null,
-        });
-    } catch (error) {
-        return NextResponse.json({ success: false, error: { message: 'Server error' } }, { status: 500 });
+    if (!leadId) {
+      return NextResponse.json(
+        { success: false, message: "Lead id missing" },
+        { status: 400 }
+      );
     }
+
+    const rows = await db
+      .select()
+      .from(leads)
+      .where(eq(leads.id, leadId))
+      .limit(1);
+
+    const lead = rows[0];
+
+    if (!lead) {
+      return NextResponse.json(
+        { success: false, message: "Lead not found" },
+        { status: 404 }
+      );
+    }
+
+    const interestLevel = (lead.interest_level || "").toLowerCase().trim();
+    const paymentMethod = (lead.payment_method || "").toLowerCase().trim();
+
+    // Access rule: lead exists AND hot interest AND payment method is not cash
+    const canAccess =
+      !!lead.id &&
+      interestLevel === "hot" &&
+      paymentMethod !== "cash";
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        leadId,
+        canAccess,
+        reason: canAccess
+          ? null
+          : "Step 2 allowed only for hot leads with non-cash payment method",
+      },
+    });
+  } catch (error) {
+    console.error("KYC access-check error:", error);
+    return NextResponse.json(
+      { success: false, message: "Failed to check KYC access" },
+      { status: 500 }
+    );
+  }
 }

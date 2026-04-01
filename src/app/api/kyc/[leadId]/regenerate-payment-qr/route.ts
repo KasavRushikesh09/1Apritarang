@@ -5,9 +5,9 @@ import { eq, desc } from 'drizzle-orm';
 import { createClient } from '@/lib/supabase/server';
 import { createPaymentQr, closeQrCode } from '@/lib/razorpay';
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

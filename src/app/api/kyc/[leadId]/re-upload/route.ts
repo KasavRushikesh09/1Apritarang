@@ -4,9 +4,9 @@ import { kycDocuments, kycVerifications } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { createClient } from '@/lib/supabase/server';
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const formData = await req.formData();
         const file = formData.get('file') as File;
         const verificationType = formData.get('verificationType') as string;

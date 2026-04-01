@@ -42,9 +42,9 @@ async function upsertVerification(leadId: string, type: string, values: Record<s
     }
 }
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const { couponCode, pan_number, account_number, ifsc, account_holder_name } = await req.json();
 
         // Use coupon

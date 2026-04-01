@@ -3,9 +3,9 @@ import { db } from '@/lib/db';
 import { leads } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function PATCH(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const { payment_method } = await req.json();
 
         if (!['upfront', 'finance'].includes(payment_method)) {

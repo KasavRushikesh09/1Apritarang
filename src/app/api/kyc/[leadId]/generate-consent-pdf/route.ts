@@ -3,9 +3,9 @@ import { db } from '@/lib/db';
 import { leads, consentRecords } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
 
         const lead = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
         if (!lead.length) {

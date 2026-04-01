@@ -6,9 +6,9 @@ import { calculateDiscount } from '@/lib/razorpay';
 
 const BASE_FEE = Number(process.env.FACILITATION_FEE_BASE_AMOUNT) || 1500;
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const { couponCode } = await req.json();
 
         if (!couponCode) {

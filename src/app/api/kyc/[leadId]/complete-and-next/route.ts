@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { leads, kycDocuments, kycVerifications, consentRecords } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { leads, kycDocuments, kycVerifications } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ leadId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { leadId: string } }) {
     try {
-        const { leadId } = await params;
+        const { leadId } = params;
         const { paymentMethod } = await req.json();
 
         // Server-side validations
