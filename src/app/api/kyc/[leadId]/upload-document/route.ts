@@ -8,13 +8,20 @@ import { requireRole } from "@/lib/auth-utils";
 import { uploadFileToStorage } from "@/lib/storage"; // your storage helper
 
 type RouteContext = {
-  params: { leadId: string };
+  params: Promise<{ leadId: string }>;
 };
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   try {
     const user = await requireRole(["dealer"]);
-    const { leadId } = params;
+    const { leadId } = await params;
+
+    if (!leadId) {
+      return NextResponse.json(
+        { success: false, error: { message: "Lead id missing" } },
+        { status: 400 }
+      );
+    }
 
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -36,6 +43,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       fileBuffer: buffer,
       fileName: file.name,
       folder: `kyc/${leadId}`,
+      contentType: file.type || "application/octet-stream",
     });
 
     const fileUrl = uploadResult.url;

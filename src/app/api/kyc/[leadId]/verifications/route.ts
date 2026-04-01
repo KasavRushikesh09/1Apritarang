@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { requireRole } from "@/lib/auth-utils";
 
 type RouteContext = {
-  params: { leadId: string };
+  params: Promise<{ leadId: string }>;
 };
 
 const LABELS: Record<string, string> = {
@@ -33,7 +33,7 @@ const DEFAULT_VERIFICATIONS = [
 export async function GET(_req: NextRequest, { params }: RouteContext) {
   try {
     const user = await requireRole(["dealer"]);
-    const { leadId } = params;
+    const { leadId } = await params;
 
     const leadRows = await db
       .select()

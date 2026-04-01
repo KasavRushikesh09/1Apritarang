@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { requireRole } from "@/lib/auth-utils";
 
 type RouteContext = {
-  params: { leadId: string };
+  params: Promise<{ leadId: string }>;
 };
 
 const ALWAYS_REQUIRED = [
@@ -26,7 +26,14 @@ const ALWAYS_REQUIRED = [
 export async function GET(_req: Request, context: RouteContext) {
   try {
     await requireRole(["dealer"]);
-    const { leadId } = context.params;
+    const { leadId } = await context.params;
+
+    if (!leadId) {
+      return NextResponse.json(
+        { success: false, message: "Lead id missing" },
+        { status: 400 }
+      );
+    }
 
     const leadRows = await db
       .select()

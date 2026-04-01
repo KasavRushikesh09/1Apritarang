@@ -826,23 +826,13 @@ export const kycDocuments = pgTable('kyc_documents', {
     file_url: text('file_url'),
     file_name: text('file_name'),
     file_size: integer('file_size'),
-    file_type: varchar('file_type', { length: 50 }),
-
-    doc_status: varchar('doc_status', { length: 30 }).default('not_uploaded').notNull(), // not_uploaded, uploaded, verified, rejected, reupload_requested
     verification_status: varchar('verification_status', { length: 30 }).default('pending').notNull(), // pending, in_progress, success, failed, awaiting_action
 
-    uploaded_by: uuid('uploaded_by').references(() => users.id),
-    verified_by: uuid('verified_by').references(() => users.id),
-
     failed_reason: text('failed_reason'),
-    rejection_reason: text('rejection_reason'),
 
     ocr_data: jsonb('ocr_data'),
-    extracted_data: jsonb('extracted_data'),
     api_response: jsonb('api_response'),
-    api_verification_results: jsonb('api_verification_results'),
 
-    verified_at: timestamp('verified_at', { withTimezone: true }),
     uploaded_at: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => {

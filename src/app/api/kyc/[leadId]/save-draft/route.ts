@@ -3,9 +3,15 @@ import { db } from '@/lib/db';
 import { leads } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function PATCH(req: NextRequest, { params }: { params: { leadId: string } }) {
+type RouteContext = { params: Promise<{ leadId: string }> };
+
+export async function PATCH(req: NextRequest, { params }: RouteContext) {
     try {
-        const { leadId } = params;
+        const { leadId } = await params;
+        if (!leadId) {
+            return NextResponse.json({ success: false, error: { message: 'leadId missing' } }, { status: 400 });
+        }
+
         const { step, data } = await req.json();
 
         await db.update(leads)

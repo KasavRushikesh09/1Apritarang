@@ -22,7 +22,7 @@ export async function uploadFileToStorage({
   fileName,
   folder = "",
   bucket = "documents",
-  contentType,
+  contentType = "application/octet-stream",
   upsert = true,
 }: UploadParams): Promise<UploadResult> {
   const supabase = await createClient();

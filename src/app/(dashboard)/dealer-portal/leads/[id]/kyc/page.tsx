@@ -204,32 +204,19 @@ export default function KYCPage() {
     }, [loading, accessDenied, uploadedDocs, consentStatus]);
 
     const requiredDocs = useMemo(() => {
-        const paymentMethod = (lead?.payment_method || '').toLowerCase();
-        const isFinance = ['finance', 'dealer_finance', 'other_finance', 'loan'].includes(paymentMethod);
-
-        if (!isFinance) {
-            return [...UPFRONT_DOCUMENTS];
-        }
-
         const assetModel = String(lead?.asset_model || lead?.asset_category || '').toUpperCase();
         const isVehicle = ['2W', '3W', '4W'].includes(assetModel);
 
+        // Always show the full set; RC Copy becomes required only for vehicle assets
         return FINANCE_DOCUMENTS.map((doc) =>
-            doc.key === 'rc_copy' ? { ...doc, required: isVehicle } : doc
+            doc.key === 'rc_copy' ? { ...doc, required: isVehicle } : { ...doc, required: true }
         );
     }, [lead]);
 
     const docStats = useMemo(() => {
         const required = requiredDocs.filter((d) => d.required);
-        const uploaded = required.filter((d) => {
-            const row = uploadedDocs[d.key];
-            return !!row?.file_url;
-        });
-
-        const pending = required.filter((d) => {
-            const row = uploadedDocs[d.key];
-            return !row?.file_url;
-        });
+        const uploaded = required.filter((d) => uploadedDocs[d.key]?.file_url);
+        const pending = required.filter((d) => !uploadedDocs[d.key]?.file_url);
 
         return {
             total: required.length,
@@ -237,6 +224,11 @@ export default function KYCPage() {
             pending,
         };
     }, [requiredDocs, uploadedDocs]);
+
+    const handleDocDrop = async (documentType: string, files?: FileList | null) => {
+        if (!files?.[0]) return;
+        await handleDocUpload(documentType, files[0]);
+    };
 
     const handleDocUpload = async (documentType: string, file: File) => {
         if (!file) return;
@@ -283,6 +275,21 @@ export default function KYCPage() {
                 throw new Error(data?.message || data?.error?.message || 'Upload failed');
             }
 
+            // Optimistic state update with returned URL so counters refresh immediately
+            setUploadedDocs((prev) => ({
+                ...prev,
+                [documentType]: {
+                    ...(prev[documentType] || {}),
+                    doc_type: documentType,
+                    verification_status: 'pending',
+                    doc_status: 'uploaded',
+                    file_url: data?.fileUrl || prev[documentType]?.file_url || null,
+                    file_name: file.name,
+                    file_size: file.size,
+                    uploaded_at: new Date().toISOString(),
+                },
+            }));
+
             await loadPageData(true);
         } catch (error: any) {
             console.error(error);
@@ -307,12 +314,15 @@ export default function KYCPage() {
             });
 
             if (!res.ok) {
-                throw new Error('Failed to save draft');
+                const data = await res.json().catch(() => null);
+                const msg = data?.error?.message || data?.message || 'Failed to save draft';
+                throw new Error(msg);
             }
 
             setLastSaved(`${auto ? 'Auto-saved' : 'Saved'} at ${new Date().toLocaleTimeString()}`);
         } catch (error) {
             console.error(error);
+            setApiError(error instanceof Error ? error.message : 'Failed to save draft');
         } finally {
             setSavingDraft(false);
         }
@@ -615,7 +625,7 @@ export default function KYCPage() {
                             )}
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                             {requiredDocs.map((doc) => {
                                 const row = uploadedDocs[doc.key];
 
@@ -632,6 +642,7 @@ export default function KYCPage() {
                                         docStatus={row?.doc_status || 'not_uploaded'}
                                         failedReason={row?.rejection_reason || row?.failed_reason || null}
                                         onUpload={(file) => handleDocUpload(doc.key, file)}
+                                        onDropFiles={(files) => handleDocDrop(doc.key, files)}
                                     />
                                 );
                             })}
@@ -829,6 +840,7 @@ function DocumentCard({
     docStatus,
     failedReason,
     onUpload,
+    onDropFiles,
 }: {
     label: string;
     required: boolean;
@@ -840,6 +852,7 @@ function DocumentCard({
     docStatus: string;
     failedReason: string | null;
     onUpload: (file: File) => void;
+    onDropFiles?: (files: FileList | null) => void;
 }) {
     const status = (docStatus || 'not_uploaded').toLowerCase();
 
@@ -850,8 +863,8 @@ function DocumentCard({
                 Verified
             </span>
         ) : status === 'uploaded' ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700">
-                <Clock className="w-3.5 h-3.5" />
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-700">
+                <CheckCircle2 className="w-3.5 h-3.5" />
                 Uploaded - Pending Review
             </span>
         ) : status === 'reupload_requested' || status === 'rejected' ? (
@@ -868,11 +881,24 @@ function DocumentCard({
 
     return (
         <div
+            onDragOver={(e) => {
+                if (onDropFiles) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }}
+            onDrop={(e) => {
+                if (onDropFiles) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDropFiles(e.dataTransfer.files);
+                }
+            }}
             className={`rounded-2xl border p-4 transition-all ${uploaded
-                    ? 'border-blue-200 bg-blue-50/40'
-                    : status === 'reupload_requested' || status === 'rejected'
-                        ? 'border-red-200 bg-red-50/40'
-                        : 'border-dashed border-gray-200 bg-white'
+                ? 'border-green-200 bg-green-50/50'
+                : status === 'reupload_requested' || status === 'rejected'
+                    ? 'border-red-200 bg-red-50/40'
+                    : 'border-dashed border-gray-200 bg-white hover:border-[#0047AB]/60'
                 }`}
         >
             <div className="flex items-start justify-between gap-3">
@@ -931,9 +957,9 @@ function DocumentCard({
                     </div>
                 </div>
             ) : (
-                <label className="mt-5 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 cursor-pointer hover:border-[#0047AB] hover:bg-blue-50/40 transition-all">
-                    <Upload className="w-6 h-6 text-gray-300" />
-                    <span className="text-xs font-bold text-gray-500">Click to upload</span>
+                <label className="mt-5 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-4 py-8 cursor-pointer hover:border-[#0047AB] hover:bg-blue-50/30 transition-all">
+                    <Upload className="w-7 h-7 text-gray-300" />
+                    <span className="text-xs font-bold text-gray-600">Click or drag files here</span>
                     <span className="text-[10px] text-gray-400">PNG, JPEG, PDF (max 5MB)</span>
                     <input
                         type="file"
@@ -942,6 +968,7 @@ function DocumentCard({
                         onChange={(e) => {
                             if (e.target.files?.[0]) onUpload(e.target.files[0]);
                         }}
+                        onDrop={(e) => e.preventDefault()}
                     />
                 </label>
             )}

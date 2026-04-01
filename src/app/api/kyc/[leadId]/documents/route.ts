@@ -7,13 +7,20 @@ import { eq } from "drizzle-orm";
 import { requireRole } from "@/lib/auth-utils";
 
 type RouteContext = {
-  params: { leadId: string };
+  params: Promise<{ leadId: string }>;
 };
 
 export async function GET(_req: NextRequest, { params }: RouteContext) {
   try {
     const user = await requireRole(["dealer"]);
-    const { leadId } = params;
+    const { leadId } = await params;
+
+    if (!leadId) {
+      return NextResponse.json(
+        { success: false, error: { message: "Lead id missing" } },
+        { status: 400 }
+      );
+    }
 
     // ---------------------------
     // Check lead exists
